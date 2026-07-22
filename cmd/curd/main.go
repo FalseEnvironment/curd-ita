@@ -53,7 +53,7 @@ func main() {
 		fmt.Println("Error applying storage migration:", migrateErr)
 		return
 	} else if updated {
-		fmt.Println("Updated provider settings to the current default fallback stack.")
+		fmt.Println("Updated config for this curd version (new options and/or migrations).")
 	}
 	internal.SetGlobalConfig(&userCurdConfig)
 
@@ -77,6 +77,7 @@ func main() {
 	flag.BoolVar(&userCurdConfig.SaveMpvSpeed, "save-mpv-speed", userCurdConfig.SaveMpvSpeed, "Save MPV speed setting (true/false)")
 	flag.BoolVar(&userCurdConfig.DiscordPresence, "discord-presence", userCurdConfig.DiscordPresence, "Enable Discord presence (true/false)")
 	flag.StringVar(&userCurdConfig.DiscordClientId, "discord-client-id", userCurdConfig.DiscordClientId, "Discord client ID for Rich Presence")
+	flag.BoolVar(&userCurdConfig.VimKeys, "vim-keys", userCurdConfig.VimKeys, "Enable vim motions in selection menus (j/k/h/l, / search) (true/false)")
 	continueLast := flag.Bool("c", false, "Continue last episode")
 	addNewAnime := flag.Bool("new", false, "Add new anime")
 	rofiSelection := flag.Bool("rofi", false, "Open selection in rofi")

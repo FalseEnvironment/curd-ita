@@ -121,6 +121,78 @@ func TestSelectionCtrlCSelectsQuit(t *testing.T) {
 	}
 }
 
+func TestVimKeysNormalModeNavigatesWithoutFiltering(t *testing.T) {
+	prev := GetGlobalConfig()
+	SetGlobalConfig(&CurdConfig{VimKeys: true})
+	t.Cleanup(func() { SetGlobalConfig(prev) })
+
+	model := &Model{
+		allOptions: []SelectionOption{
+			{Key: "1", Label: "Alpha"},
+			{Key: "2", Label: "Bravo"},
+			{Key: "3", Label: "Charlie"},
+		},
+		filteredKeys: []SelectionOption{
+			{Key: "1", Label: "Alpha"},
+			{Key: "2", Label: "Bravo"},
+			{Key: "3", Label: "Charlie"},
+		},
+		selected:   0,
+		isHomeMenu: false,
+	}
+
+	// j should move down, not type into filter.
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	model = updated.(*Model)
+	if model.selected != 1 {
+		t.Fatalf("j should move down, selected=%d", model.selected)
+	}
+	if model.filter != "" {
+		t.Fatalf("j must not enter filter in normal mode, filter=%q", model.filter)
+	}
+
+	// k moves up.
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	model = updated.(*Model)
+	if model.selected != 0 {
+		t.Fatalf("k should move up, selected=%d", model.selected)
+	}
+
+	// / enters search mode; then typing filters.
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	model = updated.(*Model)
+	if !model.filterActive {
+		t.Fatal("expected / to enter search mode")
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'B'}})
+	model = updated.(*Model)
+	if model.filter != "B" {
+		t.Fatalf("expected filter B in search mode, got %q", model.filter)
+	}
+}
+
+func TestLegacyModeStillTypeToFilter(t *testing.T) {
+	prev := GetGlobalConfig()
+	SetGlobalConfig(&CurdConfig{VimKeys: false})
+	t.Cleanup(func() { SetGlobalConfig(prev) })
+
+	model := &Model{
+		allOptions: []SelectionOption{
+			{Key: "1", Label: "Alpha"},
+			{Key: "2", Label: "Bravo"},
+		},
+		filteredKeys: []SelectionOption{
+			{Key: "1", Label: "Alpha"},
+			{Key: "2", Label: "Bravo"},
+		},
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	model = updated.(*Model)
+	if model.filter != "j" {
+		t.Fatalf("legacy mode should type-to-filter, got filter=%q", model.filter)
+	}
+}
+
 func TestSelectionEnterWithNoMatchesDoesNotPanic(t *testing.T) {
 	model := &Model{filteredKeys: nil, selected: 0}
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})

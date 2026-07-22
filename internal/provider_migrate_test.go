@@ -114,6 +114,84 @@ func TestMigrateOnVersionUpgradeWritesVersionAndUpdatesProvider(t *testing.T) {
 	}
 }
 
+func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "curd.conf")
+	storagePath := filepath.Join(tempDir, "share")
+	// Minimal pre-upgrade config: no VimKeys, no MpvPlaybackStartTimeout.
+	initial := "StoragePath=" + storagePath + "\n" +
+		"AddMissingOptions=true\n" +
+		"Provider=stacked\n" +
+		"Player=mpv\n"
+	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	// LoadConfig must not rewrite the file just for missing defaults.
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(before), "VimKeys=") {
+		t.Fatalf("LoadConfig should not inject VimKeys into the file every start:\n%s", before)
+	}
+	// In-memory default still applies.
+	if config.VimKeys {
+		t.Fatal("VimKeys default should be false in memory")
+	}
+
+	updated, err := MigrateOnVersionUpgrade(configPath, &config, "2.0.3")
+	if err != nil {
+		t.Fatalf("MigrateOnVersionUpgrade: %v", err)
+	}
+	if !updated {
+		t.Fatal("expected config file to gain new options on version upgrade")
+	}
+
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config after migrate: %v", err)
+	}
+	text := string(after)
+	if !strings.Contains(text, "VimKeys=false") {
+		t.Fatalf("expected VimKeys=false appended on upgrade:\n%s", text)
+	}
+	if !strings.Contains(text, "MpvPlaybackStartTimeout=20") {
+		t.Fatalf("expected MpvPlaybackStartTimeout appended on upgrade:\n%s", text)
+	}
+	// Original keys preserved at the top (append-only for new keys).
+	if !strings.HasPrefix(strings.TrimSpace(text), "StoragePath=") && !strings.Contains(text, "StoragePath="+storagePath) {
+		t.Fatalf("original StoragePath should remain:\n%s", text)
+	}
+
+	// Same version: no further rewrite.
+	updated, err = MigrateOnVersionUpgrade(configPath, &config, "2.0.3")
+	if err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	if updated {
+		t.Fatal("same version must not re-inject options")
+	}
+}
+
+func TestInjectMissingConfigDefaultsIdempotent(t *testing.T) {
+	m := map[string]string{"Player": "mpv"}
+	added := injectMissingConfigDefaults(m)
+	if len(added) == 0 {
+		t.Fatal("expected missing keys to be injected")
+	}
+	if _, ok := m["VimKeys"]; !ok {
+		t.Fatal("expected VimKeys default")
+	}
+	if second := injectMissingConfigDefaults(m); len(second) != 0 {
+		t.Fatalf("second inject should be empty, got %v", second)
+	}
+}
+
 func TestConfiguredProviderNamesUsesStackedByDefault(t *testing.T) {
 	withAllProvidersEnabledForTest(t)
 	got := ConfiguredProviderNames(&CurdConfig{})

@@ -21,6 +21,7 @@ import (
 // Model represents the application state for the selection prompt
 type Model struct {
 	filter         string
+	filterActive   bool // when VimKeys is on: true after "/" enters search mode
 	filteredKeys   []SelectionOption
 	allOptions     []SelectionOption
 	selected       int
@@ -83,6 +84,45 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
+func (m *Model) moveSelectionDown() {
+	if m.selected < len(m.filteredKeys)-1 {
+		m.selected++
+	}
+	if m.selected >= m.scrollOffset+m.visibleItemsCount() {
+		m.scrollOffset++
+	}
+}
+
+func (m *Model) moveSelectionUp() {
+	if m.selected > 0 {
+		m.selected--
+	}
+	if m.selected < m.scrollOffset {
+		m.scrollOffset--
+	}
+}
+
+func (m *Model) confirmSelection() tea.Cmd {
+	if len(m.filteredKeys) == 0 {
+		return nil
+	}
+	if m.filteredKeys[m.selected].Key == "add_new" {
+		CurdOut("Adding a new anime...")
+		m.filteredKeys[m.selected] = SelectionOption{Label: "add_new", Key: "0"}
+	}
+	return tea.Quit
+}
+
+func (m *Model) exitMenu() tea.Cmd {
+	if m.isHomeMenu {
+		m.filteredKeys = []SelectionOption{{Key: "-1", Label: "Quit"}}
+	} else {
+		m.filteredKeys = []SelectionOption{{Key: "-2", Label: "Back"}}
+	}
+	m.selected = 0
+	return tea.Quit
+}
+
 // Update handles user input and updates the model
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle terminal resize messages
@@ -92,67 +132,90 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	updateFilter := false
+	vimKeys := VimKeysEnabled(nil)
 
 	switch msg := msg.(type) {
 	case optionsRefreshedMsg:
 		m.replaceOptions(msg.options)
 		return m, nil
 	case tea.KeyMsg:
-		switch msg.String() {
+		key := msg.String()
+
+		switch key {
 		case "ctrl+c":
 			m.filteredKeys = []SelectionOption{{Key: "-1", Label: "Quit"}}
 			m.selected = 0
 			return m, tea.Quit
-		case "esc":
-			// ESC: quit on home menu, go back on sub-menus
-			if m.isHomeMenu {
-				// Quit
-				m.filteredKeys = []SelectionOption{{Key: "-1", Label: "Quit"}}
-				m.selected = 0
-			} else {
-				// Go back
-				m.filteredKeys = []SelectionOption{{Key: "-2", Label: "Back"}}
-				m.selected = 0
+		}
+
+		// --- Vim-enabled selection: normal mode vs search mode ---
+		if vimKeys {
+			// Search mode: typing filters; j/k/arrows still navigate results.
+			if m.filterActive {
+				switch key {
+				case "esc":
+					// Leave search mode but keep the current filter applied.
+					m.filterActive = false
+					return m, nil
+				case "enter":
+					return m, m.confirmSelection()
+				case "backspace":
+					if len(m.filter) > 0 {
+						m.filter = m.filter[:len(m.filter)-1]
+						updateFilter = true
+					}
+				case "down", "j", "tab", "ctrl+n", "l", "right":
+					m.moveSelectionDown()
+				case "up", "k", "shift+tab", "ctrl+p", "h", "left":
+					m.moveSelectionUp()
+				default:
+					if len(key) == 1 && key >= " " && key <= "~" {
+						m.filter += key
+						updateFilter = true
+					}
+				}
+				break
 			}
-			return m, tea.Quit
+
+			// Normal mode: motions only; "/" or "?" starts search.
+			switch key {
+			case "/", "?":
+				m.filterActive = true
+				return m, nil
+			case "esc":
+				return m, m.exitMenu()
+			case "enter":
+				return m, m.confirmSelection()
+			case "down", "j", "tab", "ctrl+n", "l", "right":
+				m.moveSelectionDown()
+			case "up", "k", "shift+tab", "ctrl+p", "h", "left":
+				m.moveSelectionUp()
+			case "backspace":
+				// Ignore — filter is only edited in search mode.
+			default:
+				// Do not type into filter in normal mode.
+			}
+			break
+		}
+
+		// --- Legacy behavior: every printable key filters immediately ---
+		switch key {
+		case "esc":
+			return m, m.exitMenu()
 		case "backspace":
 			if len(m.filter) > 0 {
 				m.filter = m.filter[:len(m.filter)-1]
 				updateFilter = true
 			}
 		case "down", "tab", "ctrl+n":
-			// Move the selection cursor down
-			if m.selected < len(m.filteredKeys)-1 {
-				m.selected++
-			}
-
-			// Scroll the view if necessary
-			if m.selected >= m.scrollOffset+m.visibleItemsCount() {
-				m.scrollOffset++
-			}
+			m.moveSelectionDown()
 		case "up", "shift+tab", "ctrl+p":
-			// Move the selection cursor up
-			if m.selected > 0 {
-				m.selected--
-			}
-
-			// Scroll the view if necessary
-			if m.selected < m.scrollOffset {
-				m.scrollOffset--
-			}
+			m.moveSelectionUp()
 		case "enter":
-			if len(m.filteredKeys) == 0 {
-				return m, nil
-			}
-			if m.filteredKeys[m.selected].Key == "add_new" {
-				CurdOut("Adding a new anime...")
-				m.filteredKeys[m.selected] = SelectionOption{Label: "add_new", Key: "0"}
-				return m, tea.Quit
-			}
-			return m, tea.Quit
+			return m, m.confirmSelection()
 		default:
-			if len(msg.String()) == 1 && msg.String() >= " " && msg.String() <= "~" {
-				m.filter += msg.String()
+			if len(key) == 1 && key >= " " && key <= "~" {
+				m.filter += key
 				updateFilter = true
 			}
 		}
@@ -214,11 +277,26 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	// Display the search prompt and filter with colors
-	b.WriteString(titleStyle.Render("Search") + " (Press " +
-		quitHintStyle.Render("Ctrl+C") + " to quit):\n")
-
-	b.WriteString(filterLabelStyle.Render("Filter: ") +
-		filterTextStyle.Render(m.filter) + "\n\n") // Added extra newline for spacing
+	if VimKeysEnabled(nil) {
+		if m.filterActive {
+			b.WriteString(titleStyle.Render("Search") + " (Esc: leave search · Enter: select · j/k: move):\n")
+			b.WriteString(filterLabelStyle.Render("Filter: ") +
+				filterTextStyle.Render(m.filter+"▌") + "\n\n")
+		} else {
+			b.WriteString(titleStyle.Render("Select") + " (j/k/h/l · / search · Enter · Esc):\n")
+			if m.filter != "" {
+				b.WriteString(filterLabelStyle.Render("Filter: ") +
+					filterTextStyle.Render(m.filter) + "\n\n")
+			} else {
+				b.WriteString(quitHintStyle.Render("Press / to search") + "\n\n")
+			}
+		}
+	} else {
+		b.WriteString(titleStyle.Render("Search") + " (Press " +
+			quitHintStyle.Render("Ctrl+C") + " to quit):\n")
+		b.WriteString(filterLabelStyle.Render("Filter: ") +
+			filterTextStyle.Render(m.filter) + "\n\n")
+	}
 
 	if len(m.filteredKeys) == 0 {
 		b.WriteString(noMatchesStyle.Render("No matches found.") + "\n")

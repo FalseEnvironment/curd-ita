@@ -62,6 +62,7 @@ type CurdConfig struct {
 	AlternateScreen            bool     `config:"AlternateScreen"`
 	DiscordPresence            bool     `config:"DiscordPresence"`
 	DiscordClientId            string   `config:"DiscordClientId"`
+	VimKeys                    bool     `config:"VimKeys"`
 	Provider                   string   `config:"Provider"`
 	DisabledProviders          string   `config:"DisabledProviders"`
 	ManualProviderSearch       bool     `config:"ManualProviderSearch"`
@@ -118,6 +119,7 @@ func defaultConfigMap() map[string]string {
 		"AlternateScreen":            "true",
 		"DiscordPresence":            "true",
 		"DiscordClientId":            "1287457464148820089",
+		"VimKeys":                    "false",
 		"Provider":                   "stacked",
 		"DisabledProviders":          "[]",
 		"ManualProviderSearch":       "false",
@@ -129,6 +131,17 @@ func defaultConfigMap() map[string]string {
 		"MyAnimeListImported":        "false",
 		"MyAnimeListImportDismissed": "false",
 	}
+}
+
+// VimKeysEnabled reports whether selection menus should use vim-style motions.
+func VimKeysEnabled(config *CurdConfig) bool {
+	if config != nil {
+		return config.VimKeys
+	}
+	if globalConfig != nil {
+		return globalConfig.VimKeys
+	}
+	return false
 }
 
 var globalConfig *CurdConfig
@@ -236,44 +249,50 @@ func LoadConfig(configPath string) (CurdConfig, error) {
 	_, hadTrackingConfigured := configMap["TrackingConfigured"]
 	legacyConfig := !createdConfig && !hadTrackingRemote && !hadTrackingConfigured
 
-	// Add missing fields to the config map
-	updated := false
-	defaultConfigMap := defaultConfigMap()
-	for key, defaultValue := range defaultConfigMap {
-		if _, exists := configMap[key]; !exists {
-			configMap[key] = defaultValue
-			updated = true
+	// fileMap = keys actually present on disk (never bulk-fill with all defaults).
+	// workMap = file keys + in-memory defaults for PopulateConfig.
+	fileMap := configMap
+	workMap := make(map[string]string, len(fileMap)+len(defaultConfigMap()))
+	for key, value := range fileMap {
+		workMap[key] = value
+	}
+	for key, defaultValue := range defaultConfigMap() {
+		if _, exists := workMap[key]; !exists {
+			workMap[key] = defaultValue
 		}
 	}
+
+	// One-time legacy tracking migration: only touch tracking keys on disk.
+	updated := false
 	if legacyConfig {
-		configMap["TrackingLocal"] = "true"
-		configMap["TrackingRemote"] = TrackingRemoteAniList
-		configMap["TrackingConfigured"] = "true"
+		fileMap["TrackingLocal"] = "true"
+		fileMap["TrackingRemote"] = TrackingRemoteAniList
+		fileMap["TrackingConfigured"] = "true"
+		workMap["TrackingLocal"] = "true"
+		workMap["TrackingRemote"] = TrackingRemoteAniList
+		workMap["TrackingConfigured"] = "true"
 		updated = true
 	}
 
-	if providerValue, exists := configMap["Provider"]; exists {
+	if providerValue, exists := fileMap["Provider"]; exists {
 		normalizedProviderValue := canonicalProviderConfigValue(providerValue)
 		if normalizedProviderValue != providerValue {
-			configMap["Provider"] = normalizedProviderValue
+			fileMap["Provider"] = normalizedProviderValue
+			workMap["Provider"] = normalizedProviderValue
 			updated = true
 		}
 	}
 
-	// Write updated config back to file only if AddMissingOptions is true
+	// Persist only real migrations (legacy tracking / provider normalize) — not every
+	// missing default. New defaults are appended once in MigrateOnVersionUpgrade.
 	if addMissing && updated {
-		if err := SaveConfigToFile(configPath, configMap); err != nil {
+		if err := SaveConfigToFile(configPath, fileMap); err != nil {
 			return CurdConfig{}, fmt.Errorf("error saving updated config file: %v", err)
 		}
 	}
 
-	// Parse string arrays
-	if mpvArgs, exists := configMap["MpvArgs"]; exists {
-		configMap["MpvArgs"] = mpvArgs
-	}
-
-	// Populate the CurdConfig struct from the config map
-	config := PopulateConfig(configMap)
+	// Populate the CurdConfig struct from the complete (in-memory) work map
+	config := PopulateConfig(workMap)
 	normalizeTrackingConfig(&config)
 
 	return config, nil
