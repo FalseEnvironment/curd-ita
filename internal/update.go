@@ -553,18 +553,19 @@ func HandlePendingUpdatePrompt(config *CurdConfig, currentVersion string) bool {
 		fmt.Println(header.Render(prompt))
 		fmt.Println(message)
 		fmt.Println()
-		selected, err = DynamicSelectPreserveOrder(options)
+		selected, err = promptSelectOrdered(options)
 	}
 	if err != nil {
 		return false
 	}
+	selected = NormalizeSelectionKey(selected)
 	// Quit from the pinned menu must exit the whole program (not fall through to curd).
-	if selected.Key == "-1" || strings.EqualFold(selected.Label, "Quit") {
+	if SelectionMeansQuit(selected) {
 		ExitCurd(nil)
 		return true
 	}
 	// Back / empty = dismiss update prompt and continue the session.
-	if selected.Key == "-2" || selected.Key == "continue" || selected.Key == "" {
+	if SelectionMeansBack(selected) || selected.Key == "continue" || selected.Key == "" {
 		return false
 	}
 

@@ -407,6 +407,35 @@ func detectHomeMenu(options []SelectionOption) bool {
 	return false
 }
 
+// SelectionMeansQuit reports whether the user chose Quit (by key or label).
+func SelectionMeansQuit(opt SelectionOption) bool {
+	if opt.Key == "-1" {
+		return true
+	}
+	label := strings.TrimSpace(opt.Label)
+	return strings.EqualFold(label, "Quit") || strings.EqualFold(label, "quit")
+}
+
+// SelectionMeansBack reports whether the user chose Back / dismiss (by key or label).
+func SelectionMeansBack(opt SelectionOption) bool {
+	if opt.Key == "-2" || strings.EqualFold(opt.Key, "back") {
+		return true
+	}
+	label := strings.ToLower(strings.TrimSpace(opt.Label))
+	return label == "back" || label == "back to menu" || label == "back to list"
+}
+
+// NormalizeSelectionKey forces Quit/Back labels onto the canonical keys used by callers.
+func NormalizeSelectionKey(opt SelectionOption) SelectionOption {
+	if SelectionMeansQuit(opt) {
+		return SelectionOption{Key: "-1", Label: "Quit"}
+	}
+	if SelectionMeansBack(opt) {
+		return SelectionOption{Key: "-2", Label: "Back"}
+	}
+	return opt
+}
+
 func findSelectionIndex(options []SelectionOption, previousKey string, previousLabel string, fallbackIndex int) int {
 	if previousKey != "" {
 		for idx, option := range options {
@@ -770,6 +799,10 @@ func DynamicSelectPreserveOrder(options []SelectionOption) (SelectionOption, err
 
 var promptSelect = DynamicSelect
 
+// promptSelectOrdered is used for action menus where option order matters.
+// Tests may replace this the same way as promptSelect.
+var promptSelectOrdered = DynamicSelectPreserveOrder
+
 func DynamicSelectWithRefresh(options []SelectionOption, refreshConfig *SelectionRefreshConfig) (SelectionOption, error) {
 	return dynamicSelectInternal(options, refreshConfig, false)
 }
@@ -848,10 +881,14 @@ func dynamicSelectInternal(options []SelectionOption, refreshConfig *SelectionRe
 		return SelectionOption{}, fmt.Errorf("unexpected model type")
 	}
 
-	if finalSelectionModel.selected < len(finalSelectionModel.filteredKeys) {
-		return finalSelectionModel.filteredKeys[finalSelectionModel.selected], nil
+	if finalSelectionModel.selected >= 0 && finalSelectionModel.selected < len(finalSelectionModel.filteredKeys) {
+		return NormalizeSelectionKey(finalSelectionModel.filteredKeys[finalSelectionModel.selected]), nil
 	}
-	return SelectionOption{}, nil
+	// Empty list / out of range — treat as cancel (Back for submenus, Quit on home).
+	if finalSelectionModel.isHomeMenu {
+		return SelectionOption{Key: "-1", Label: "Quit"}, nil
+	}
+	return SelectionOption{Key: "-2", Label: "Back"}, nil
 }
 
 func buildRofiOptionsString(options []SelectionOption, isHomeMenu bool) string {
@@ -880,21 +917,27 @@ func parseRofiSelection(err error, rawSelection string, options []SelectionOptio
 	}
 
 	selected := strings.TrimSpace(rawSelection)
-	switch selected {
-	case "":
+	// Strip accidental Pango/markup noise if a theme echoes it.
+	selected = strings.TrimSpace(ansiStrip.ReplaceAllString(selected, ""))
+	switch {
+	case selected == "":
 		if isHomeMenu {
 			return SelectionOption{Key: "-1", Label: "Quit"}, nil
 		}
 		return SelectionOption{Key: "-2", Label: "Back"}, nil
-	case "Back":
+	case strings.EqualFold(selected, "Back"), strings.EqualFold(selected, "Back to menu"), strings.EqualFold(selected, "Back to list"):
 		return SelectionOption{Label: "Back", Key: "-2"}, nil
-	case "Quit":
+	case strings.EqualFold(selected, "Quit"):
 		return SelectionOption{Label: "Quit", Key: "-1"}, nil
 	}
 
 	for _, opt := range options {
-		if opt.Label == selected {
-			return opt, nil
+		if opt.Label == selected || strings.EqualFold(opt.Label, selected) {
+			return NormalizeSelectionKey(opt), nil
+		}
+		// Match when emoji/spacing differs slightly (e.g. double-space after emoji).
+		if strings.EqualFold(strings.Join(strings.Fields(opt.Label), " "), strings.Join(strings.Fields(selected), " ")) {
+			return NormalizeSelectionKey(opt), nil
 		}
 	}
 

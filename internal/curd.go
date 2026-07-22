@@ -677,11 +677,16 @@ func SetupCurd(userCurdConfig *CurdConfig, anime *Anime, user *User, databaseAni
 						ExitCurd(fmt.Errorf("Failed to select category"))
 					}
 
-					if categorySelection.Key == "-1" || strings.EqualFold(categorySelection.Label, "Quit") {
+					categorySelection = NormalizeSelectionKey(categorySelection)
+					if SelectionMeansQuit(categorySelection) {
 						ExitCurd(nil)
 					}
 
-					if categorySelection.Key == "-2" || strings.EqualFold(categorySelection.Label, "Back") {
+					if SelectionMeansBack(categorySelection) {
+						continue
+					}
+					if categorySelection.Key == "" {
+						// Empty/cancelled selection — re-show category menu.
 						continue
 					}
 
@@ -792,18 +797,22 @@ func SetupCurd(userCurdConfig *CurdConfig, anime *Anime, user *User, databaseAni
 
 					Log(anilistSelectedOption)
 
-					if anilistSelectedOption.Key == "-1" {
+					anilistSelectedOption = NormalizeSelectionKey(anilistSelectedOption)
+					if SelectionMeansQuit(anilistSelectedOption) {
 						ExitCurd(nil)
 					}
 
 					// Handle back navigation - go back to category selection
-					if anilistSelectedOption.Key == "-2" {
+					if SelectionMeansBack(anilistSelectedOption) {
 						if userCurdConfig.CurrentCategory {
 							// If CurrentCategory is forced, back means quit
 							ExitCurd(nil)
 						}
 						ClearScreen()
 						continue categorySelectionLoop
+					}
+					if anilistSelectedOption.Key == "" {
+						continue animeSelectionLoop
 					}
 
 					if anilistSelectedOption.Label == "add_new" || anilistSelectedOption.Key == "add_new" {

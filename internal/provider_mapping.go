@@ -370,16 +370,16 @@ func promptProviderSearchRecovery(config *CurdConfig, state *providerMappingSear
 	if message == "" {
 		message = fmt.Sprintf("No results found for '%s' on %s.", state.query, state.currentProviderLabel())
 	}
-	CurdOut(message)
 
-	selected, err := promptSelect(options)
+	selected, err := selectWithOptionalMessage(config, options, "Provider search", message)
 	if err != nil {
 		return "", err
 	}
-	if selected.Key == "-1" {
+	selected = NormalizeSelectionKey(selected)
+	if SelectionMeansQuit(selected) {
 		return "quit", nil
 	}
-	if selected.Key == "-2" {
+	if SelectionMeansBack(selected) || selected.Key == "back" {
 		return "back", nil
 	}
 	return selected.Key, nil
@@ -398,18 +398,29 @@ func promptProviderMatchRecovery(config *CurdConfig, state *providerMappingSearc
 	}
 	options = append(options, SelectionOption{Key: "back", Label: "Back to menu"})
 
-	CurdOut("We didn't find an automatic provider match.")
-	selected, err := promptSelect(options)
+	selected, err := selectWithOptionalMessage(config, options, "Provider match", "We didn't find an automatic provider match.")
 	if err != nil {
 		return "", err
 	}
-	if selected.Key == "-1" {
+	selected = NormalizeSelectionKey(selected)
+	if SelectionMeansQuit(selected) {
 		return "quit", nil
 	}
-	if selected.Key == "-2" {
+	if SelectionMeansBack(selected) || selected.Key == "back" {
 		return "back", nil
 	}
 	return selected.Key, nil
+}
+
+// selectWithOptionalMessage uses Rofi -mesg when Rofi is on (no notify spam), else prints + ordered select.
+func selectWithOptionalMessage(config *CurdConfig, options []SelectionOption, prompt, message string) (SelectionOption, error) {
+	if config != nil && config.RofiSelection {
+		return RofiSelectWithMessage(options, false, prompt, message)
+	}
+	if strings.TrimSpace(message) != "" {
+		fmt.Println(message)
+	}
+	return promptSelectOrdered(options)
 }
 
 func activeProviderName(config *CurdConfig, state *providerMappingSearchState) string {
@@ -800,20 +811,19 @@ func episodeLinkFailureRecoveryOptions(preferredMode string, includeAudio bool) 
 	preferredMode = normalizeTranslationType(preferredMode)
 	alternateMode := alternateTranslationType(preferredMode)
 
+	// No numeric indices — callers must use DynamicSelectPreserveOrder / Rofi (keeps order).
 	options := []SelectionOption{
-		{Key: "remap", Label: "1. Search for this anime again"},
+		{Key: "remap", Label: "Search for this anime again"},
 	}
-	next := 2
 	if includeAudio {
 		options = append(options, SelectionOption{
 			Key:   "audio",
-			Label: fmt.Sprintf("%d. Try other audio (%s)", next, alternateMode),
+			Label: fmt.Sprintf("Try other audio (%s)", alternateMode),
 		})
-		next++
 	}
 	options = append(options, SelectionOption{
 		Key:   "episode",
-		Label: fmt.Sprintf("%d. Change episode number (if this one is wrong)", next),
+		Label: "Change episode number (if this one is wrong)",
 	})
 	return options
 }
@@ -876,16 +886,22 @@ func promptEpisodeLinkFailureRecovery(config *CurdConfig, anime *Anime, lastErr 
 		selected, err = RofiSelectWithMessage(options, false, "Playback recovery", diagnosis)
 	} else {
 		fmt.Println(diagnosis)
-		selected, err = promptSelect(options)
+		selected, err = promptSelectOrdered(options)
 	}
 	if err != nil {
+		return "back"
+	}
+	selected = NormalizeSelectionKey(selected)
+	if SelectionMeansQuit(selected) {
+		ExitCurd(nil)
+		return "back"
+	}
+	if SelectionMeansBack(selected) || selected.Key == "" {
 		return "back"
 	}
 	switch selected.Key {
 	case "remap", "audio", "episode":
 		return selected.Key
-	case "-1", "-2", "quit", "back", "":
-		return "back"
 	default:
 		return "back"
 	}

@@ -11,7 +11,7 @@ func TestEpisodeLinkFailureRecoveryOptionsOrder(t *testing.T) {
 	if len(withAudio) != 3 {
 		t.Fatalf("expected 3 options with audio, got %#v", withAudio)
 	}
-	if withAudio[0].Key != "remap" || !strings.HasPrefix(withAudio[0].Label, "1.") {
+	if withAudio[0].Key != "remap" {
 		t.Fatalf("remap should be first: %#v", withAudio[0])
 	}
 	if withAudio[1].Key != "audio" || !strings.Contains(withAudio[1].Label, "dub") {
@@ -20,11 +20,10 @@ func TestEpisodeLinkFailureRecoveryOptionsOrder(t *testing.T) {
 	if withAudio[2].Key != "episode" || !strings.Contains(strings.ToLower(withAudio[2].Label), "wrong") {
 		t.Fatalf("episode correction should be last ranked action: %#v", withAudio[2])
 	}
-
-	// Numbered labels must sort in the same priority order as DynamicSelect's alpha sort.
-	labels := []string{withAudio[0].Label, withAudio[1].Label, withAudio[2].Label}
-	if !(labels[0] < labels[1] && labels[1] < labels[2]) {
-		t.Fatalf("numbered labels should sort by priority, got %v", labels)
+	for _, opt := range withAudio {
+		if strings.HasPrefix(opt.Label, "1.") || strings.HasPrefix(opt.Label, "2.") {
+			t.Fatalf("recovery options should not be numbered: %#v", opt)
+		}
 	}
 
 	withoutAudio := episodeLinkFailureRecoveryOptions("dub", false)
@@ -33,16 +32,6 @@ func TestEpisodeLinkFailureRecoveryOptionsOrder(t *testing.T) {
 	}
 	if withoutAudio[0].Key != "remap" || withoutAudio[1].Key != "episode" {
 		t.Fatalf("unexpected options without audio: %#v", withoutAudio)
-	}
-	if !strings.HasPrefix(withoutAudio[1].Label, "2.") {
-		t.Fatalf("episode option should renumber when audio omitted: %#v", withoutAudio[1])
-	}
-	// No cancel/quit/back in our option list — DynamicSelect injects a single exit pair.
-	for _, opt := range withAudio {
-		switch opt.Key {
-		case "quit", "back", "-1", "-2", "cancel":
-			t.Fatalf("recovery options should not include exit keys: %#v", opt)
-		}
 	}
 }
 

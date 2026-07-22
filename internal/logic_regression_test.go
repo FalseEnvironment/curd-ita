@@ -200,6 +200,25 @@ func TestFilterQuitOnlyShowsQuitNotBack(t *testing.T) {
 	}
 }
 
+func TestSelectionMeansQuitAndBack(t *testing.T) {
+	if !SelectionMeansQuit(SelectionOption{Key: "-1"}) {
+		t.Fatal("key -1 should mean quit")
+	}
+	if !SelectionMeansQuit(SelectionOption{Label: "Quit"}) {
+		t.Fatal("label Quit should mean quit")
+	}
+	if !SelectionMeansBack(SelectionOption{Key: "-2"}) {
+		t.Fatal("key -2 should mean back")
+	}
+	if !SelectionMeansBack(SelectionOption{Label: "Back to menu"}) {
+		t.Fatal("Back to menu should mean back")
+	}
+	got := NormalizeSelectionKey(SelectionOption{Label: "quit"})
+	if got.Key != "-1" {
+		t.Fatalf("NormalizeSelectionKey quit -> %#v", got)
+	}
+}
+
 func TestLegacyModeStillTypeToFilter(t *testing.T) {
 	prev := GetGlobalConfig()
 	SetGlobalConfig(&CurdConfig{VimKeys: false})
