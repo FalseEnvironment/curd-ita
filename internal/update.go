@@ -662,15 +662,35 @@ func isCrossDeviceError(err error) bool {
 		strings.Contains(msg, "invalid cross-device link")
 }
 
-func preferGUIPasswordPrompt() bool {
-	if cfg := GetGlobalConfig(); cfg != nil && cfg.RofiSelection {
-		return true
-	}
-	// No usable TTY (common when launched from a desktop entry / rofi).
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return true
-	}
+func hasDisplay() bool {
 	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+}
+
+func stdinIsTerminal() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// preferGUIPasswordPrompt decides whether to open a desktop password dialog.
+//
+//   - Rofi/desktop mode → GUI first (zenity/yad/kdialog)
+//   - Plain CLI with a TTY (e.g. `curd -u` in a terminal) → terminal only
+//   - No TTY but a display → GUI
+func preferGUIPasswordPrompt() bool {
+	rofi := false
+	if cfg := GetGlobalConfig(); cfg != nil {
+		rofi = cfg.RofiSelection
+	}
+	tty := stdinIsTerminal()
+
+	// Interactive CLI: never pop a GUI dialog just because DISPLAY is set.
+	if tty && !rofi {
+		return false
+	}
+	if rofi {
+		return true
+	}
+	// Headless of TTY (desktop launcher without a terminal): GUI if available.
+	return !tty && hasDisplay()
 }
 
 // promptSudoPasswordGUI tries GTK/desktop password dialogs (zenity → yad → kdialog).
@@ -724,22 +744,38 @@ func promptSudoPassword(prompt string) (string, error) {
 		prompt = "Administrator password (sudo) to install update: "
 	}
 
-	// Rofi / desktop: prefer GTK password dialog so the user isn't dumped to a TTY.
+	rofi := false
+	if cfg := GetGlobalConfig(); cfg != nil {
+		rofi = cfg.RofiSelection
+	}
+	tty := stdinIsTerminal()
+
+	// Rofi/desktop: try zenity/yad/kdialog first.
 	if preferGUIPasswordPrompt() {
 		if password, err := promptSudoPasswordGUI(prompt); err == nil {
 			return password, nil
 		} else {
-			Log(fmt.Sprintf("GUI password prompt unavailable (%v); falling back to terminal", err))
-			// If cancel was explicit, don't fall through to a broken TTY prompt in rofi mode.
-			if strings.Contains(err.Error(), "cancelled") {
-				return "", err
+			Log(fmt.Sprintf("GUI password prompt unavailable (%v)", err))
+			// Explicit cancel in GUI: only abort if we shouldn't fall back to TTY.
+			// In rofi mode with no TTY, cancel means cancel.
+			if strings.Contains(err.Error(), "cancelled") && (!tty || rofi) {
+				// If we still have a real terminal under us (rare with rofi), allow TTY
+				// fallback only when not in rofi mode.
+				if !tty {
+					return "", err
+				}
+				if rofi {
+					// Rofi session: user closed the dialog on purpose.
+					return "", err
+				}
 			}
+			// GUI missing/failed → fall through to terminal when possible.
 		}
 	}
 
-	// Terminal fallback (CLI mode or no GUI tool installed).
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return "", fmt.Errorf("no terminal available for password entry; install zenity for a GUI prompt")
+	// Terminal path (CLI `curd -u`, or GUI unavailable).
+	if !tty {
+		return "", fmt.Errorf("no terminal available for password entry; install zenity/yad/kdialog for a GUI prompt")
 	}
 	fmt.Fprint(os.Stderr, prompt)
 	if !strings.HasSuffix(prompt, " ") {

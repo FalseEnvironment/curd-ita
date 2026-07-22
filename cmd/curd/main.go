@@ -120,29 +120,34 @@ func main() {
 
 	anime.Ep.ContinueLast = *continueLast
 
+	// Apply UI flags before -u so password prompt mode (terminal vs GTK) is correct.
+	if *rofiSelection {
+		userCurdConfig.RofiSelection = true
+	}
+	if *noRofi || runtime.GOOS == "windows" {
+		userCurdConfig.RofiSelection = false
+	}
+	// `curd -u` is a CLI operation: always use the terminal for sudo when stdin is a TTY,
+	// even if RofiSelection is enabled in the config file.
+	if *updateScript {
+		userCurdConfig.RofiSelection = false
+	}
+	internal.SetGlobalConfig(&userCurdConfig)
+
 	if *updateScript {
 		repo := "wraient/curd"
 		fileName := "curd"
 
 		if err := internal.UpdateCurd(repo, fileName); err != nil {
-			internal.CurdOut(fmt.Sprintf("Error updating executable: %v\n", err))
-			internal.ExitCurd(err)
-		} else {
-			internal.CurdOut("Program Updated!")
-			internal.ExitCurd(nil)
+			fmt.Fprintf(os.Stderr, "Error updating executable: %v\n", err)
+			os.Exit(1)
 		}
+		fmt.Println("Program Updated!")
+		os.Exit(0)
 	}
 
 	if *currentCategory {
 		userCurdConfig.CurrentCategory = true
-	}
-
-	if *rofiSelection {
-		userCurdConfig.RofiSelection = true
-	}
-
-	if *noRofi || runtime.GOOS == "windows" {
-		userCurdConfig.RofiSelection = false
 	}
 
 	if *imagePreview {

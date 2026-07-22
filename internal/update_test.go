@@ -147,9 +147,11 @@ func TestPreferGUIPasswordPromptWithRofi(t *testing.T) {
 		t.Fatal("expected GUI password preference when RofiSelection is on")
 	}
 
+	// CLI mode (Rofi off): never force GUI just because a display session exists.
 	SetGlobalConfig(&CurdConfig{RofiSelection: false})
-	// Without rofi, result depends on TTY/DISPLAY — just ensure it doesn't panic.
-	_ = preferGUIPasswordPrompt()
+	if preferGUIPasswordPrompt() && stdinIsTerminal() {
+		t.Fatal("CLI with a TTY should use terminal password, not GUI")
+	}
 }
 
 func TestIsCrossDeviceError(t *testing.T) {
