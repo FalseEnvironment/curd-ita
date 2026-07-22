@@ -365,12 +365,16 @@ func (m *Model) filterOptions() {
 		})
 	}
 
-	// Determine whether the current filter is a substring of the pinned labels.
-	// When the filter matches "back" (e.g. "b", "ba", "bac", "back"), Back should
-	// appear BEFORE "Add new anime" so it is easy to reach. Otherwise keep the
-	// default order: Add new anime → Back → Quit.
-	// All three pinned items are always shown regardless of filter text.
-	filterLower := strings.ToLower(m.filter)
+	// Pin Back / Add new / Quit only when the filter is empty or matches their labels.
+	// Previously Quit/Back were always forced visible, so "/quit" still showed Back first
+	// and Enter could select the wrong row.
+	filterLower := strings.ToLower(strings.TrimSpace(m.filter))
+	pinMatches := func(label string) bool {
+		if filterLower == "" {
+			return true
+		}
+		return strings.Contains(strings.ToLower(label), filterLower)
+	}
 	backMatchesFilter := filterLower != "" && strings.Contains("back", filterLower)
 
 	// If filter targets "back", pin it above Add new anime
@@ -378,19 +382,20 @@ func (m *Model) filterOptions() {
 		m.filteredKeys = append(m.filteredKeys, SelectionOption{Label: "Back", Key: "-2"})
 	}
 
-	// Add new anime is always shown (pinned)
-	if m.addNewOption {
-
+	// Add new anime when unfiltered or filter matches
+	if m.addNewOption && pinMatches("Add new anime") {
 		m.filteredKeys = append(m.filteredKeys, SelectionOption{Label: "Add new anime", Key: "add_new"})
 	}
 
-	// Back in its default position (after Add new anime) when filter doesn't target it
-	if !m.isHomeMenu && !backMatchesFilter {
+	// Back in its default position when unfiltered (or filter matches "back" handled above)
+	if !m.isHomeMenu && !backMatchesFilter && pinMatches("Back") {
 		m.filteredKeys = append(m.filteredKeys, SelectionOption{Label: "Back", Key: "-2"})
 	}
 
-	// Quit is always last
-	m.filteredKeys = append(m.filteredKeys, SelectionOption{Label: "Quit", Key: "-1"})
+	// Quit last — only when unfiltered or filter matches "quit"
+	if pinMatches("Quit") {
+		m.filteredKeys = append(m.filteredKeys, SelectionOption{Label: "Quit", Key: "-1"})
+	}
 }
 
 func detectHomeMenu(options []SelectionOption) bool {

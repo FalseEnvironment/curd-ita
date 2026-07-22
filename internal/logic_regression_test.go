@@ -185,6 +185,21 @@ func TestVimKeysNormalModeNavigatesWithoutFiltering(t *testing.T) {
 	_ = model
 }
 
+func TestFilterQuitOnlyShowsQuitNotBack(t *testing.T) {
+	model := &Model{
+		allOptions: []SelectionOption{
+			{Key: "CURRENT", Label: "Currently Watching"},
+			{Key: "ALL", Label: "Show All"},
+		},
+		isHomeMenu: false, // action-style menu that has Back
+		filter:     "quit",
+	}
+	model.filterOptions()
+	if len(model.filteredKeys) != 1 || model.filteredKeys[0].Key != "-1" {
+		t.Fatalf("filter 'quit' should only pin Quit, got %#v", model.filteredKeys)
+	}
+}
+
 func TestLegacyModeStillTypeToFilter(t *testing.T) {
 	prev := GetGlobalConfig()
 	SetGlobalConfig(&CurdConfig{VimKeys: false})

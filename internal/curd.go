@@ -677,11 +677,11 @@ func SetupCurd(userCurdConfig *CurdConfig, anime *Anime, user *User, databaseAni
 						ExitCurd(fmt.Errorf("Failed to select category"))
 					}
 
-					if categorySelection.Key == "-1" {
+					if categorySelection.Key == "-1" || strings.EqualFold(categorySelection.Label, "Quit") {
 						ExitCurd(nil)
 					}
 
-					if categorySelection.Key == "-2" {
+					if categorySelection.Key == "-2" || strings.EqualFold(categorySelection.Label, "Back") {
 						continue
 					}
 
