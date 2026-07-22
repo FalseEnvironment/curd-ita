@@ -288,6 +288,147 @@ func TestParseAnimeListMalformedInputReturnsEmptyList(t *testing.T) {
 	}
 }
 
+func TestParseAnimeListSkipsCustomListsThatReExportEntries(t *testing.T) {
+	// AniList returns the same MediaList entry under the status list and again
+	// under each custom list that includes it.
+	input := map[string]interface{}{
+		"data": map[string]interface{}{
+			"MediaListCollection": map[string]interface{}{
+				"lists": []interface{}{
+					map[string]interface{}{
+						"name":         "Watching",
+						"isCustomList": false,
+						"entries": []interface{}{
+							map[string]interface{}{
+								"id":        float64(1001),
+								"status":    "CURRENT",
+								"progress":  float64(3),
+								"repeat":    float64(0),
+								"updatedAt": float64(1_700_000_000),
+								"media": map[string]interface{}{
+									"id":       float64(42),
+									"idMal":    float64(420),
+									"episodes": float64(12),
+									"duration": float64(24),
+									"format":   "TV",
+									"title": map[string]interface{}{
+										"english": "Example Show",
+										"romaji":  "Example Show",
+										"native":  "例",
+									},
+									"status": "RELEASING",
+								},
+							},
+						},
+					},
+					map[string]interface{}{
+						"name":         "Favorites",
+						"isCustomList": true,
+						"entries": []interface{}{
+							map[string]interface{}{
+								"id":        float64(1001),
+								"status":    "CURRENT",
+								"progress":  float64(3),
+								"repeat":    float64(0),
+								"updatedAt": float64(1_700_000_000),
+								"media": map[string]interface{}{
+									"id":       float64(42),
+									"idMal":    float64(420),
+									"episodes": float64(12),
+									"duration": float64(24),
+									"format":   "TV",
+									"title": map[string]interface{}{
+										"english": "Example Show",
+										"romaji":  "Example Show",
+										"native":  "例",
+									},
+									"status": "RELEASING",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	list := ParseAnimeList(input)
+	if len(list.Watching) != 1 {
+		t.Fatalf("expected custom-list re-export to be skipped, watching=%d", len(list.Watching))
+	}
+	all := getEntriesByCategory(list, "ALL")
+	if len(all) != 1 || all[0].Media.ID != 42 {
+		t.Fatalf("Show All should list media 42 once, got %#v", all)
+	}
+}
+
+func TestParseAnimeListDedupesSameMediaWithoutIsCustomListFlag(t *testing.T) {
+	// Older/cached payloads may omit isCustomList; still dedupe by media ID.
+	input := map[string]interface{}{
+		"data": map[string]interface{}{
+			"MediaListCollection": map[string]interface{}{
+				"lists": []interface{}{
+					map[string]interface{}{
+						"name": "Watching",
+						"entries": []interface{}{
+							map[string]interface{}{
+								"id":        float64(1),
+								"status":    "CURRENT",
+								"progress":  float64(1),
+								"updatedAt": float64(1_700_000_000),
+								"media": map[string]interface{}{
+									"id":    float64(7),
+									"title": map[string]interface{}{"english": "Seven", "romaji": "Seven"},
+								},
+							},
+						},
+					},
+					map[string]interface{}{
+						"name": "Seasonal",
+						"entries": []interface{}{
+							map[string]interface{}{
+								"id":        float64(1),
+								"status":    "CURRENT",
+								"progress":  float64(1),
+								"updatedAt": float64(1_700_000_000),
+								"media": map[string]interface{}{
+									"id":    float64(7),
+									"title": map[string]interface{}{"english": "Seven", "romaji": "Seven"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	list := ParseAnimeList(input)
+	if len(list.Watching) != 1 {
+		t.Fatalf("expected media-ID dedupe without isCustomList, watching=%d", len(list.Watching))
+	}
+}
+
+func TestGetEntriesByCategoryDedupesAcrossBuckets(t *testing.T) {
+	list := AnimeList{
+		Watching: []Entry{
+			{Media: Media{ID: 1, Title: AnimeTitle{English: "A"}}, Status: "CURRENT"},
+			{Media: Media{ID: 1, Title: AnimeTitle{English: "A (dup)"}}, Status: "CURRENT"},
+		},
+		Completed: []Entry{
+			{Media: Media{ID: 2, Title: AnimeTitle{English: "B"}}, Status: "COMPLETED"},
+		},
+	}
+	all := getEntriesByCategory(list, "ALL")
+	if len(all) != 2 {
+		t.Fatalf("expected 2 unique media IDs in ALL, got %d (%#v)", len(all), all)
+	}
+	current := getEntriesByCategory(list, "CURRENT")
+	if len(current) != 1 || current[0].Media.ID != 1 {
+		t.Fatalf("expected CURRENT to dedupe watching, got %#v", current)
+	}
+}
+
 func TestMediaDisplayTitleFallsBackToID(t *testing.T) {
 	title := mediaDisplayTitle(Media{ID: 42}, &CurdConfig{AnimeNameLanguage: "english"})
 	if title != "42" {

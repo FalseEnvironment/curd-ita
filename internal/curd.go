@@ -1553,7 +1553,8 @@ func CheckAndDownloadFiles(storagePath string, filesToCheck []string) error {
 func getEntriesByCategory(list AnimeList, category string) []Entry {
 	switch category {
 	case "ALL":
-		// Combine all categories into one slice
+		// Combine all categories into one slice. Dedupe by Media.ID so Show All
+		// never surfaces the same anime twice (e.g. stale cache / dual-track edge cases).
 		allEntries := make([]Entry, 0)
 		allEntries = append(allEntries, list.Watching...)
 		allEntries = append(allEntries, list.Completed...)
@@ -1561,22 +1562,22 @@ func getEntriesByCategory(list AnimeList, category string) []Entry {
 		allEntries = append(allEntries, list.Dropped...)
 		allEntries = append(allEntries, list.Planning...)
 		allEntries = append(allEntries, list.Rewatching...)
-		return allEntries
+		return dedupeEntriesByMediaID(allEntries)
 	case "CURRENT":
 		currentEntries := make([]Entry, 0, len(list.Watching)+len(list.Rewatching))
 		currentEntries = append(currentEntries, list.Watching...)
 		currentEntries = append(currentEntries, list.Rewatching...)
-		return currentEntries
+		return dedupeEntriesByMediaID(currentEntries)
 	case "COMPLETED":
-		return list.Completed
+		return dedupeEntriesByMediaID(list.Completed)
 	case "PAUSED":
-		return list.Paused
+		return dedupeEntriesByMediaID(list.Paused)
 	case "DROPPED":
-		return list.Dropped
+		return dedupeEntriesByMediaID(list.Dropped)
 	case "PLANNING":
-		return list.Planning
+		return dedupeEntriesByMediaID(list.Planning)
 	case "REWATCHING": // Added for completeness, though "ALL" covers it.
-		return list.Rewatching
+		return dedupeEntriesByMediaID(list.Rewatching)
 	default:
 		return []Entry{}
 	}

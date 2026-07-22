@@ -517,6 +517,8 @@ func GetUserData(token string, userID int) (map[string]interface{}, error) {
 	query ($userId: Int, $type: MediaType) {
 		MediaListCollection(userId: $userId, type: $type) {
 			lists {
+				name
+				isCustomList
 				entries {
 					id
 					media {
@@ -575,6 +577,8 @@ func GetUserDataPreview(token string, userID int) (map[string]interface{}, error
 	query ($userId: Int, $type: MediaType) {
 		MediaListCollection(userId: $userId, type: $type) {
 			lists {
+				name
+				isCustomList
 				entries {
 					id
 					media {
@@ -663,9 +667,14 @@ func SearchAnimeByTitle(jsonData map[string]interface{}, searchTitle string) []m
 	if !ok {
 		return results
 	}
+	seenMediaIDs := make(map[int]struct{})
 	for _, list := range lists {
 		listMap, ok := list.(map[string]interface{})
 		if !ok {
+			continue
+		}
+		// Custom lists re-export status-list entries and would create search hits twice.
+		if isAniListCustomList(listMap) {
 			continue
 		}
 		entries, ok := listMap["entries"].([]interface{})
@@ -692,8 +701,21 @@ func SearchAnimeByTitle(jsonData map[string]interface{}, searchTitle string) []m
 			if value, ok := media["duration"].(float64); ok {
 				duration = int(value)
 			}
+			mediaID := 0
+			switch id := media["id"].(type) {
+			case float64:
+				mediaID = int(id)
+			case int:
+				mediaID = id
+			}
 
 			if strings.Contains(strings.ToLower(romajiTitle), strings.ToLower(searchTitle)) || strings.Contains(strings.ToLower(englishTitle), strings.ToLower(searchTitle)) {
+				if mediaID != 0 {
+					if _, seen := seenMediaIDs[mediaID]; seen {
+						continue
+					}
+					seenMediaIDs[mediaID] = struct{}{}
+				}
 				result := map[string]interface{}{
 					"id":            media["id"],
 					"progress":      entryMap["progress"],
@@ -986,6 +1008,39 @@ func makePostRequestAttempt(url string, requestBody []byte, headers map[string]s
 	return nil, fmt.Errorf("AniList request failed after retries")
 }
 
+// isAniListCustomList reports whether a MediaListCollection list is a user custom
+// list. Custom lists re-export entries that already appear under status lists, so
+// including them double-counts the same media in Show All / CURRENT.
+func isAniListCustomList(listData map[string]interface{}) bool {
+	if listData == nil {
+		return false
+	}
+	if isCustom, ok := listData["isCustomList"].(bool); ok {
+		return isCustom
+	}
+	return false
+}
+
+// dedupeEntriesByMediaID keeps the first occurrence of each non-zero Media.ID.
+func dedupeEntriesByMediaID(entries []Entry) []Entry {
+	if len(entries) < 2 {
+		return entries
+	}
+	seen := make(map[int]struct{}, len(entries))
+	out := make([]Entry, 0, len(entries))
+	for _, entry := range entries {
+		id := entry.Media.ID
+		if id != 0 {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 func ParseAnimeList(input map[string]interface{}) AnimeList {
 	var animeList AnimeList
 
@@ -1053,9 +1108,15 @@ func ParseAnimeList(input map[string]interface{}) AnimeList {
 		return animeList
 	}
 
+	// Prefer status lists; custom lists re-export the same MediaList entries.
+	seenMediaIDs := make(map[int]struct{})
+
 	for _, list := range mediaList {
 		listData, ok := list.(map[string]interface{})
 		if !ok {
+			continue
+		}
+		if isAniListCustomList(listData) {
 			continue
 		}
 		entries, ok := listData["entries"].([]interface{})
@@ -1101,6 +1162,15 @@ func ParseAnimeList(input map[string]interface{}) AnimeList {
 
 			if coverImage, ok := media["coverImage"].(map[string]interface{}); ok {
 				animeEntry.CoverImage = safeString(coverImage["large"])
+			}
+
+			// Defense in depth: never insert the same media twice even if AniList
+			// returns the entry under multiple non-custom lists.
+			if animeEntry.Media.ID != 0 {
+				if _, exists := seenMediaIDs[animeEntry.Media.ID]; exists {
+					continue
+				}
+				seenMediaIDs[animeEntry.Media.ID] = struct{}{}
 			}
 
 			// Append entries based on their status
