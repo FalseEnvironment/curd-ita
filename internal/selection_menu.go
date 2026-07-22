@@ -30,6 +30,7 @@ type Model struct {
 	scrollOffset   int
 	addNewOption   bool
 	isHomeMenu     bool // If true, ESC quits; if false, ESC goes back
+	preserveOrder  bool // skip alphabetical sort (action menus with a fixed priority)
 }
 
 type optionsRefreshedMsg struct {
@@ -347,12 +348,14 @@ func (m *Model) filterOptions() {
 		}
 	}
 
-	// Sort the filtered options alphabetically unless this is a menu selection
-	isMenu := false
-	for _, opt := range m.allOptions {
-		if opt.Key == "ALL" || opt.Key == "CURRENT" {
-			isMenu = true
-			break
+	// Sort alphabetically unless this is a home menu or an ordered action list.
+	isMenu := m.preserveOrder
+	if !isMenu {
+		for _, opt := range m.allOptions {
+			if opt.Key == "ALL" || opt.Key == "CURRENT" {
+				isMenu = true
+				break
+			}
 		}
 	}
 
@@ -745,21 +748,27 @@ func rofiSelectInternal(options []SelectionOption, isHomeMenu bool, refreshConfi
 }
 
 func DynamicSelectFromSlice(options []SelectionOption) (SelectionOption, error) {
-	return dynamicSelectInternal(options, nil)
+	return dynamicSelectInternal(options, nil, false)
 }
 
 // DynamicSelect displays a simple selection prompt without extra features
 func DynamicSelect(options []SelectionOption) (SelectionOption, error) {
-	return dynamicSelectInternal(options, nil)
+	return dynamicSelectInternal(options, nil, false)
+}
+
+// DynamicSelectPreserveOrder is like DynamicSelect but keeps the caller's option order
+// (no alphabetical sort). Use for action menus where the first item is the primary action.
+func DynamicSelectPreserveOrder(options []SelectionOption) (SelectionOption, error) {
+	return dynamicSelectInternal(options, nil, true)
 }
 
 var promptSelect = DynamicSelect
 
 func DynamicSelectWithRefresh(options []SelectionOption, refreshConfig *SelectionRefreshConfig) (SelectionOption, error) {
-	return dynamicSelectInternal(options, refreshConfig)
+	return dynamicSelectInternal(options, refreshConfig, false)
 }
 
-func dynamicSelectInternal(options []SelectionOption, refreshConfig *SelectionRefreshConfig) (SelectionOption, error) {
+func dynamicSelectInternal(options []SelectionOption, refreshConfig *SelectionRefreshConfig, preserveOrder bool) (SelectionOption, error) {
 	isHomeMenu := detectHomeMenu(options)
 
 	if isHomeMenu {
@@ -783,9 +792,10 @@ func dynamicSelectInternal(options []SelectionOption, refreshConfig *SelectionRe
 	}
 
 	model := &Model{
-		allOptions:   cleanOptions,
-		isHomeMenu:   isHomeMenu,
-		addNewOption: hasAddNew,
+		allOptions:    cleanOptions,
+		isHomeMenu:    isHomeMenu,
+		addNewOption:  hasAddNew,
+		preserveOrder: preserveOrder,
 	}
 	model.filterOptions()
 

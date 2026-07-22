@@ -286,13 +286,50 @@ func buildUpdatePromptMessage(currentVersion string, state updatePendingState) (
 		fmt.Fprintf(&b, "%s\n", state.HTMLURL)
 	}
 	b.WriteString("\n")
-	b.WriteString(state.ReleaseNotes)
+	notes := strings.TrimSpace(state.ReleaseNotes)
+	if notes == "" {
+		notes = "(No release notes on GitHub for this release.)"
+	}
+	b.WriteString(notes)
 	message = strings.TrimSpace(b.String())
 	// Rofi -mesg stays readable; keep a hard cap.
 	if runes := []rune(message); len(runes) > maxReleaseNotesRunes {
-		message = string(runes[:maxReleaseNotesRunes]) + "\n… (truncated)"
+		message = string(runes[:maxReleaseNotesRunes]) + "\n… (truncated — full notes on GitHub)"
 	}
 	return prompt, message
+}
+
+// refreshUpdateStateFromGitHub reloads tag/name/body/url from the live release API
+// so the prompt shows real markdown notes instead of a stale/test seed.
+func refreshUpdateStateFromGitHub(state *updatePendingState) {
+	if state == nil {
+		return
+	}
+	release, err := fetchLatestGitHubRelease(defaultUpdateRepo)
+	if err != nil {
+		Log(fmt.Sprintf("Could not refresh release notes from GitHub: %v", err))
+		return
+	}
+	latest := normalizeReleaseVersion(release.TagName)
+	if latest == "" {
+		return
+	}
+	// If GitHub moved past what we flagged, still show the newest release.
+	state.LatestTag = release.TagName
+	state.LatestVersion = latest
+	state.ReleaseName = strings.TrimSpace(release.Name)
+	if state.ReleaseName == "" {
+		state.ReleaseName = "Curd " + latest
+	}
+	// Full markdown body from the GitHub release page (API `body` field).
+	// Do not seed/test stubs here — always prefer live API content when online.
+	state.ReleaseNotes = strings.TrimSpace(release.Body)
+	state.HTMLURL = release.HTMLURL
+	state.CheckedAt = time.Now().UTC().Format(time.RFC3339)
+	if asset, assetErr := curdReleaseBinaryName(); assetErr == nil {
+		state.AssetName = asset
+	}
+	state.Available = true
 }
 
 // updateUserMessage prints a single status line. With Rofi mode, CurdOut becomes
@@ -324,13 +361,24 @@ func HandlePendingUpdatePrompt(config *CurdConfig, currentVersion string) bool {
 		return false
 	}
 
-	// Numbered labels keep priority order under DynamicSelect's alphabetical sort.
+	// Pull live release markdown from GitHub so notes match the release page.
+	refreshUpdateStateFromGitHub(&state)
+	if !pendingUpdateShouldPrompt(config, currentVersion, state) {
+		// e.g. already up to date after refresh
+		state.Available = false
+		_ = saveUpdatePendingState(config.StoragePath, state)
+		return false
+	}
+	_ = saveUpdatePendingState(config.StoragePath, state)
+
+	// Fixed order (Update now first). No index prefixes — Rofi keeps order;
+	// CLI uses DynamicSelectPreserveOrder so labels aren't alpha-sorted.
 	options := []SelectionOption{
-		{Key: "update", Label: "1. Update now"},
-		{Key: "later", Label: "2. Remind me later"},
-		{Key: "skip", Label: "3. Skip this version"},
-		{Key: "disable", Label: "4. Turn off automatic update checks"},
-		{Key: "continue", Label: "5. Continue without updating"},
+		{Key: "update", Label: "Update now"},
+		{Key: "later", Label: "Remind me later"},
+		{Key: "skip", Label: "Skip this version"},
+		{Key: "disable", Label: "Turn off automatic update checks"},
+		{Key: "continue", Label: "Continue without updating"},
 	}
 	prompt, message := buildUpdatePromptMessage(currentVersion, state)
 
@@ -343,7 +391,7 @@ func HandlePendingUpdatePrompt(config *CurdConfig, currentVersion string) bool {
 		fmt.Println(prompt)
 		fmt.Println(message)
 		fmt.Println()
-		selected, err = promptSelect(options)
+		selected, err = DynamicSelectPreserveOrder(options)
 	}
 	if err != nil || selected.Key == "-1" || selected.Key == "-2" || selected.Key == "continue" || selected.Key == "" {
 		return false
