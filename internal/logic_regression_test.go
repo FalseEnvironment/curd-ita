@@ -185,10 +185,14 @@ func TestPopulateConfigFallsBackToDefaultsOnInvalidValues(t *testing.T) {
 	config := PopulateConfig(map[string]string{
 		"PercentageToMarkComplete": "not-a-number",
 		"SkipOp":                   "not-a-bool",
+		"MpvPlaybackStartTimeout":  "not-a-number",
 	})
 
 	if config.PercentageToMarkComplete != 85 {
 		t.Fatalf("expected default completion percentage, got %d", config.PercentageToMarkComplete)
+	}
+	if config.MpvPlaybackStartTimeout != DefaultMpvPlaybackStartTimeout {
+		t.Fatalf("expected default playback timeout, got %d", config.MpvPlaybackStartTimeout)
 	}
 	if !config.SkipOp {
 		t.Fatalf("expected invalid bool to fall back to default true")

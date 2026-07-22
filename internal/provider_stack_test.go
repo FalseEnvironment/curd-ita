@@ -337,6 +337,50 @@ func TestResolveEpisodeURLUsesProviderListOrder(t *testing.T) {
 	}
 }
 
+func TestFilterExcludedProviders(t *testing.T) {
+	filtered := filterExcludedProviders([]string{"senshi", "allanime", "anipub"}, []string{"senshi", "SENSHI"})
+	if len(filtered) != 2 || filtered[0] != "allanime" || filtered[1] != "anipub" {
+		t.Fatalf("unexpected filtered providers: %#v", filtered)
+	}
+}
+
+func TestResolveEpisodeURLExcludingProviders(t *testing.T) {
+	allanime := &stackStubProvider{
+		name: "allanime",
+		episodeResults: map[string]map[string][]string{
+			"allanime-id": {"sub": {"allanime-sub"}},
+		},
+		searchResults: map[string][]SelectionOption{
+			"sub": {{Title: "Example", Key: "allanime-id"}},
+		},
+	}
+	senshi := &stackStubProvider{
+		name: "senshi",
+		episodeResults: map[string]map[string][]string{
+			"senshi-id": {"sub": {"senshi-sub"}},
+		},
+		searchResults: map[string][]SelectionOption{
+			"sub": {{Title: "Example", Key: "senshi-id"}},
+		},
+	}
+	withProviderFactories(t, allanime, senshi)
+
+	cfg := CurdConfig{Provider: `["senshi","allanime"]`, SubOrDub: "sub"}
+	anime := &Anime{
+		Title:        AnimeTitle{Romaji: "Example"},
+		ProviderName: "senshi",
+		ProviderId:   "senshi-id",
+	}
+
+	result, err := ResolveEpisodeURLExcludingProviders(cfg, anime, 1, []string{"senshi"})
+	if err != nil {
+		t.Fatalf("ResolveEpisodeURLExcludingProviders returned error: %v", err)
+	}
+	if result.ProviderName != "allanime" || result.Links[0] != "allanime-sub" {
+		t.Fatalf("expected allanime fallback, got %#v", result)
+	}
+}
+
 func TestResolveEpisodeURLForPlaybackTriesAllPreferredProvidersBeforeAudioFallback(t *testing.T) {
 	allanime := &stackStubProvider{
 		name: "allanime",

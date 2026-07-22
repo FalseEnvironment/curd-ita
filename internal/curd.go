@@ -1473,14 +1473,45 @@ episodeLinksReady:
 	} else {
 		CurdOut(fmt.Sprintf("%s - Episode %d", GetAnimeName(*anime), anime.Ep.Number))
 	}
-	mpvSocketPath, err := StartVideo(PrioritizeLink(anime.Ep.Links), []string{}, fmt.Sprintf("%s - Episode %d", GetAnimeName(*anime), anime.Ep.Number), anime)
+	title := fmt.Sprintf("%s - Episode %d", GetAnimeName(*anime), anime.Ep.Number)
+	var excludedProviders []string
 
-	if err != nil {
-		Log("Failed to start mpv")
-		exitWithRestore(1)
+	for {
+		mpvSocketPath, err := StartVideo(PrioritizeLink(anime.Ep.Links), []string{}, title, anime)
+		if err != nil {
+			Log("Failed to start mpv")
+			exitWithRestore(1)
+		}
+
+		if mpvSocketPath == "android-intent" || WaitForMPVPlaybackStart(mpvSocketPath, MpvPlaybackStartTimeoutDuration(userCurdConfig)) {
+			return mpvSocketPath
+		}
+
+		failedProvider := CurrentAnimeProviderName(anime)
+		playbackTimeout := MpvPlaybackStartTimeoutDuration(userCurdConfig)
+		Log(fmt.Sprintf("Playback did not start with provider %s within %s", failedProvider, playbackTimeout))
+		CurdOut(fmt.Sprintf("Playback failed to start with %s. Trying another provider...", failedProvider))
+
+		if mpvSocketPath != "" {
+			ExitMPV(mpvSocketPath)
+		}
+		anime.Ep.Player.SocketPath = ""
+
+		excludedProviders = append(excludedProviders, failedProvider)
+		episodeResult, err := ResolveEpisodeURLExcludingProviders(*userCurdConfig, anime, anime.Ep.Number, excludedProviders)
+		if err != nil || len(episodeResult.Links) == 0 {
+			CurdOut("No alternative provider could start playback for this episode.")
+			if err != nil {
+				Log(fmt.Sprintf("Provider fallback failed: %v", err))
+			}
+			exitWithRestore(1)
+		}
+
+		anime.Ep.Links = episodeResult.Links
+		applyStreamPlaybackHints(anime, anime.Ep.Links, episodeResult.LinkHints)
+		Log(fmt.Sprintf("Retrying playback with %s/%s: %+v", episodeResult.ProviderName, episodeResult.Mode, episodeResult.Links))
+		CurdOut(fmt.Sprintf("Retrying with %s...", episodeResult.ProviderName))
 	}
-
-	return mpvSocketPath
 }
 
 func resolveRuntimeProviderID(userCurdConfig *CurdConfig, anime *Anime) error {

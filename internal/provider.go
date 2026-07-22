@@ -703,6 +703,34 @@ func episodeModeResultWithProviders(config CurdConfig, anime *Anime, epNo int, m
 	return ProviderEpisodeResult{}, fmt.Errorf("no %s episode links found across providers %s for %q episode %d: %s", mode, strings.Join(providerNames, ","), animeSearchTitle(anime), epNo, strings.Join(errors, "; "))
 }
 
+func filterExcludedProviders(providerNames []string, exclude []string) []string {
+	excludeSet := make(map[string]struct{}, len(exclude))
+	for _, name := range exclude {
+		if normalized := normalizeProviderName(name); normalized != "" {
+			excludeSet[normalized] = struct{}{}
+		}
+	}
+
+	filtered := make([]string, 0, len(providerNames))
+	for _, name := range providerNames {
+		if _, excluded := excludeSet[normalizeProviderName(name)]; excluded {
+			continue
+		}
+		filtered = append(filtered, name)
+	}
+	return filtered
+}
+
+// ResolveEpisodeURLExcludingProviders tries configured providers in order, skipping any in exclude.
+func ResolveEpisodeURLExcludingProviders(config CurdConfig, anime *Anime, epNo int, exclude []string) (ProviderEpisodeResult, error) {
+	mode := normalizeTranslationType(config.SubOrDub)
+	providerNames := filterExcludedProviders(providerNamesForAnime(&config, anime), exclude)
+	if len(providerNames) == 0 {
+		return ProviderEpisodeResult{}, fmt.Errorf("no providers left to try")
+	}
+	return episodeModeResultWithProviders(config, anime, epNo, mode, providerNames)
+}
+
 func ResolveEpisodeURL(config CurdConfig, anime *Anime, epNo int) (ProviderEpisodeResult, error) {
 	return episodeModeResult(config, anime, epNo, config.SubOrDub)
 }

@@ -18,6 +18,8 @@ import (
 
 var logFile = "debug.log"
 
+const mpvPlaybackPollInterval = 500 * time.Millisecond
+
 // This is not generic but we have MpvArgs in CurdConfig to add custom ones
 const defaultStreamReferrer = "https://allanime.day/"
 
@@ -469,6 +471,60 @@ func StartVideo(link string, args []string, title string, anime *Anime) (string,
 	}
 
 	return mpvSocketPath, nil
+}
+
+// WaitForMPVPlaybackStart polls MPV until time-pos is available or the timeout elapses.
+// Returns true when playback has started, false when MPV exits or the timeout is reached.
+func WaitForMPVPlaybackStart(ipcSocketPath string, timeout time.Duration) bool {
+	if ipcSocketPath == "" || ipcSocketPath == "android-intent" {
+		return true
+	}
+
+	deadline := time.Now().Add(timeout)
+	Log(fmt.Sprintf("Waiting up to %s for MPV playback to start at %s", timeout, ipcSocketPath))
+
+	for time.Now().Before(deadline) {
+		timePos, err := MPVSendCommand(ipcSocketPath, []interface{}{"get_property", "time-pos"})
+		if err == nil && timePos != nil {
+			if _, ok := timePos.(float64); ok {
+				Log("MPV playback started")
+				return true
+			}
+		}
+
+		if err != nil {
+			if isMPVConnectionGoneError(err) {
+				Log("MPV exited before playback could start")
+				return false
+			}
+		}
+
+		time.Sleep(mpvPlaybackPollInterval)
+	}
+
+	Log(fmt.Sprintf("MPV playback did not start within %s", timeout))
+	return false
+}
+
+func isMPVConnectionGoneError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := strings.ToLower(err.Error())
+	goneErrors := []string{
+		"connect: connection refused",
+		"connect: no such file or directory",
+		"cannot find the file specified",
+		"pipe has been ended",
+		"pipe is being closed",
+		"no process is on the other end of the pipe",
+	}
+	for _, goneError := range goneErrors {
+		if strings.Contains(errMsg, goneError) {
+			return true
+		}
+	}
+	return false
 }
 
 // Helper function to join args with a space

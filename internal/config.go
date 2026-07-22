@@ -40,6 +40,7 @@ type AnilistToken struct {
 type CurdConfig struct {
 	Player                     string   `config:"Player"`
 	MpvArgs                    []string `config:"MpvArgs"`
+	MpvPlaybackStartTimeout    int      `config:"MpvPlaybackStartTimeout"`
 	SubsLanguage               string   `config:"SubsLanguage"`
 	SubOrDub                   string   `config:"SubOrDub"`
 	SubStyle                   string   `config:"SubStyle"`
@@ -73,6 +74,17 @@ type CurdConfig struct {
 	MyAnimeListImportDismissed bool     `config:"MyAnimeListImportDismissed"`
 }
 
+const DefaultMpvPlaybackStartTimeout = 20
+const maxMpvPlaybackStartTimeout = 600
+
+func MpvPlaybackStartTimeoutDuration(config *CurdConfig) time.Duration {
+	seconds := DefaultMpvPlaybackStartTimeout
+	if config != nil && config.MpvPlaybackStartTimeout > 0 {
+		seconds = config.MpvPlaybackStartTimeout
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func GetStoragePath() string {
 	if globalConfig != nil && globalConfig.StoragePath != "" {
 		return os.ExpandEnv(globalConfig.StoragePath)
@@ -85,6 +97,7 @@ func defaultConfigMap() map[string]string {
 	return map[string]string{
 		"Player":                     "mpv",
 		"MpvArgs":                    "[]",
+		"MpvPlaybackStartTimeout":    "20",
 		"StoragePath":                "$HOME/.local/share/curd",
 		"AnimeNameLanguage":          "english",
 		"SubsLanguage":               "english",
@@ -675,6 +688,12 @@ func PopulateConfig(configMap map[string]string) CurdConfig {
 		config.PercentageToMarkComplete = 0
 	} else if config.PercentageToMarkComplete > 100 {
 		config.PercentageToMarkComplete = 100
+	}
+
+	if config.MpvPlaybackStartTimeout <= 0 {
+		config.MpvPlaybackStartTimeout = DefaultMpvPlaybackStartTimeout
+	} else if config.MpvPlaybackStartTimeout > maxMpvPlaybackStartTimeout {
+		config.MpvPlaybackStartTimeout = maxMpvPlaybackStartTimeout
 	}
 
 	return config
