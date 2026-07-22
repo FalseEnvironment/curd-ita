@@ -893,8 +893,7 @@ func promptEpisodeLinkFailureRecovery(config *CurdConfig, anime *Anime, lastErr 
 	}
 	selected = NormalizeSelectionKey(selected)
 	if SelectionMeansQuit(selected) {
-		ExitCurd(nil)
-		return "back"
+		return "quit"
 	}
 	if SelectionMeansBack(selected) || selected.Key == "" {
 		return "back"

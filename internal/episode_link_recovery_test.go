@@ -73,8 +73,8 @@ func TestPromptEpisodeLinkFailureRecoveryMapsExitKeysToBack(t *testing.T) {
 	withPromptSelect(t, func(options []SelectionOption) (SelectionOption, error) {
 		return SelectionOption{Key: "-1", Label: "Quit"}, nil
 	})
-	if got := promptEpisodeLinkFailureRecovery(cfg, anime, errors.New("fail"), true); got != "back" {
-		t.Fatalf("expected back for -1, got %q", got)
+	if got := promptEpisodeLinkFailureRecovery(cfg, anime, errors.New("fail"), true); got != "quit" {
+		t.Fatalf("expected quit for -1, got %q", got)
 	}
 }
 
