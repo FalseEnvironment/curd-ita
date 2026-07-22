@@ -324,12 +324,13 @@ func HandlePendingUpdatePrompt(config *CurdConfig, currentVersion string) bool {
 		return false
 	}
 
+	// Numbered labels keep priority order under DynamicSelect's alphabetical sort.
 	options := []SelectionOption{
-		{Key: "update", Label: "Update now"},
-		{Key: "later", Label: "Remind me later"},
-		{Key: "skip", Label: "Skip this version"},
-		{Key: "disable", Label: "Turn off automatic update checks"},
-		{Key: "continue", Label: "Continue without updating"},
+		{Key: "update", Label: "1. Update now"},
+		{Key: "later", Label: "2. Remind me later"},
+		{Key: "skip", Label: "3. Skip this version"},
+		{Key: "disable", Label: "4. Turn off automatic update checks"},
+		{Key: "continue", Label: "5. Continue without updating"},
 	}
 	prompt, message := buildUpdatePromptMessage(currentVersion, state)
 
