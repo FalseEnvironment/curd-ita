@@ -138,6 +138,20 @@ func TestFormatLocalTimeUsesLocalZone(t *testing.T) {
 	}
 }
 
+func TestPreferGUIPasswordPromptWithRofi(t *testing.T) {
+	prev := GetGlobalConfig()
+	t.Cleanup(func() { SetGlobalConfig(prev) })
+
+	SetGlobalConfig(&CurdConfig{RofiSelection: true})
+	if !preferGUIPasswordPrompt() {
+		t.Fatal("expected GUI password preference when RofiSelection is on")
+	}
+
+	SetGlobalConfig(&CurdConfig{RofiSelection: false})
+	// Without rofi, result depends on TTY/DISPLAY — just ensure it doesn't panic.
+	_ = preferGUIPasswordPrompt()
+}
+
 func TestIsCrossDeviceError(t *testing.T) {
 	if !isCrossDeviceError(errors.New("rename /tmp/a /home/b: invalid cross-device link")) {
 		t.Fatal("expected cross-device detection")

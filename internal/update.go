@@ -442,11 +442,89 @@ func isCrossDeviceError(err error) bool {
 		strings.Contains(msg, "invalid cross-device link")
 }
 
+func preferGUIPasswordPrompt() bool {
+	if cfg := GetGlobalConfig(); cfg != nil && cfg.RofiSelection {
+		return true
+	}
+	// No usable TTY (common when launched from a desktop entry / rofi).
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return true
+	}
+	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+}
+
+// promptSudoPasswordGUI tries GTK/desktop password dialogs (zenity → yad → kdialog).
+func promptSudoPasswordGUI(prompt string) (string, error) {
+	if prompt == "" {
+		prompt = "Enter your password to install the Curd update:"
+	}
+
+	type dialog struct {
+		name string
+		args []string
+	}
+	dialogs := []dialog{
+		// GTK (GNOME / many desktops)
+		{"zenity", []string{"--password", "--title=Curd Update", "--text=" + prompt}},
+		// GTK-based yad
+		{"yad", []string{"--entry", "--hide-text", "--title=Curd Update", "--text=" + prompt, "--button=OK:0", "--button=Cancel:1"}},
+		// KDE
+		{"kdialog", []string{"--title", "Curd Update", "--password", prompt}},
+	}
+
+	for _, d := range dialogs {
+		bin, err := exec.LookPath(d.name)
+		if err != nil {
+			continue
+		}
+		cmd := exec.Command(bin, d.args...)
+		out, err := cmd.Output()
+		if err != nil {
+			// User cancel or dialog error — try next tool only on "not found"; cancel stops.
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				// zenity/yad/kdialog: non-zero usually means cancel.
+				return "", fmt.Errorf("password dialog cancelled")
+			}
+			Log(fmt.Sprintf("password dialog %s failed: %v", d.name, err))
+			continue
+		}
+		password := strings.TrimRight(string(out), "\r\n")
+		if password == "" {
+			return "", fmt.Errorf("empty password")
+		}
+		Log(fmt.Sprintf("Collected sudo password via %s dialog", d.name))
+		return password, nil
+	}
+	return "", fmt.Errorf("no GUI password dialog available (tried zenity, yad, kdialog)")
+}
+
 func promptSudoPassword(prompt string) (string, error) {
 	if prompt == "" {
-		prompt = "Sudo password: "
+		prompt = "Administrator password (sudo) to install update: "
+	}
+
+	// Rofi / desktop: prefer GTK password dialog so the user isn't dumped to a TTY.
+	if preferGUIPasswordPrompt() {
+		if password, err := promptSudoPasswordGUI(prompt); err == nil {
+			return password, nil
+		} else {
+			Log(fmt.Sprintf("GUI password prompt unavailable (%v); falling back to terminal", err))
+			// If cancel was explicit, don't fall through to a broken TTY prompt in rofi mode.
+			if strings.Contains(err.Error(), "cancelled") {
+				return "", err
+			}
+		}
+	}
+
+	// Terminal fallback (CLI mode or no GUI tool installed).
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", fmt.Errorf("no terminal available for password entry; install zenity for a GUI prompt")
 	}
 	fmt.Fprint(os.Stderr, prompt)
+	if !strings.HasSuffix(prompt, " ") {
+		fmt.Fprint(os.Stderr, " ")
+	}
 	password, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Fprintln(os.Stderr)
 	if err != nil {
