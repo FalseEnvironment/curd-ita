@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -134,6 +135,62 @@ func TestFormatLocalTimeUsesLocalZone(t *testing.T) {
 	}
 	if !strings.Contains(got, "2026") || !strings.Contains(got, ":") {
 		t.Fatalf("unexpected local format %q", got)
+	}
+}
+
+func TestIsCrossDeviceError(t *testing.T) {
+	if !isCrossDeviceError(errors.New("rename /tmp/a /home/b: invalid cross-device link")) {
+		t.Fatal("expected cross-device detection")
+	}
+	if isCrossDeviceError(os.ErrPermission) {
+		t.Fatal("permission is not cross-device")
+	}
+}
+
+func TestCopyFileReplaceCrossDeviceStyle(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	src := filepath.Join(srcDir, "newbin")
+	dst := filepath.Join(dstDir, "curd")
+	if err := os.WriteFile(src, []byte("#!/bin/sh\necho new\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("#!/bin/sh\necho old\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFileReplace(src, dst); err != nil {
+		t.Fatalf("copyFileReplace: %v", err)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "new") {
+		t.Fatalf("dest not replaced: %q", data)
+	}
+}
+
+func TestReplaceExecutableHandlesCrossDevice(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	src := filepath.Join(srcDir, "downloaded")
+	dst := filepath.Join(dstDir, "curd")
+	if err := os.WriteFile(src, []byte("new-binary-content"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("old-binary-content"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// src and dst are different temp dirs — rename often fails with EXDEV on Linux.
+	if err := replaceExecutable(src, dst); err != nil {
+		t.Fatalf("replaceExecutable: %v", err)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new-binary-content" {
+		t.Fatalf("got %q", data)
 	}
 }
 

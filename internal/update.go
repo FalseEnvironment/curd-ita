@@ -425,6 +425,23 @@ func isPermissionError(err error) bool {
 		strings.Contains(msg, "operation not permitted")
 }
 
+// isCrossDeviceError reports rename/link failures when src and dest are on
+// different filesystems (e.g. /tmp tmpfs → ~/.local/bin on disk).
+func isCrossDeviceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		err = linkErr.Err
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "cross-device") ||
+		strings.Contains(msg, "cross device") ||
+		strings.Contains(msg, "exdev") ||
+		strings.Contains(msg, "invalid cross-device link")
+}
+
 func promptSudoPassword(prompt string) (string, error) {
 	if prompt == "" {
 		prompt = "Sudo password: "
@@ -469,31 +486,121 @@ func installExecutableWithSudo(src, dest string) error {
 	return nil
 }
 
-func replaceExecutable(tmpPath, executablePath string) error {
-	if runtime.GOOS == "windows" {
-		oldPath := executablePath + ".old"
-		if err := os.Rename(executablePath, oldPath); err != nil {
-			return fmt.Errorf("failed to rename old executable: %w", err)
-		}
-		if err := os.Rename(tmpPath, executablePath); err != nil {
-			_ = os.Rename(oldPath, executablePath)
-			return fmt.Errorf("failed to rename new executable: %w", err)
-		}
-		_ = os.Remove(oldPath)
-		return nil
+// createUpdateTempFile prefers a sibling of the executable (same FS as install
+// path). Falls back to os.TempDir when the install directory is not writable.
+func createUpdateTempFile(executablePath, binaryName string) (string, *os.File, error) {
+	dir := filepath.Dir(executablePath)
+	// Try same directory first for atomic rename.
+	if f, err := os.CreateTemp(dir, ".curd-download-*"); err == nil {
+		return f.Name(), f, nil
 	}
-
-	if err := os.Rename(tmpPath, executablePath); err == nil {
-		return nil
-	} else if !isPermissionError(err) {
-		return fmt.Errorf("failed to replace executable: %w", err)
+	// Fall back to system temp (may be cross-device; replaceExecutable handles that).
+	name := "curd-update-" + binaryName
+	if binaryName == "" {
+		name = "curd-update-bin"
 	}
+	path := filepath.Join(os.TempDir(), name)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return "", nil, err
+	}
+	return path, f, nil
+}
 
-	// Permission denied — e.g. installed to /usr/local/bin. Ask for sudo.
-	updateUserMessage(GetGlobalConfig(), "Update needs elevated permissions to replace the installed binary.")
-	if err := installExecutableWithSudo(tmpPath, executablePath); err != nil {
+func copyFileReplace(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
 		return err
 	}
-	_ = os.Remove(tmpPath)
+	defer in.Close()
+
+	// Write to a sibling temp on the destination filesystem, then rename into place.
+	dir := filepath.Dir(dst)
+	tmp, err := os.CreateTemp(dir, ".curd-update-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if err := tmp.Chmod(0755); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	// Atomic replace when possible (same directory = same filesystem).
+	if err := os.Rename(tmpName, dst); err != nil {
+		// Windows / busy binary: move dest aside first.
+		oldPath := dst + ".old"
+		_ = os.Remove(oldPath)
+		if renOld := os.Rename(dst, oldPath); renOld != nil && !os.IsNotExist(renOld) {
+			return renOld
+		}
+		if renNew := os.Rename(tmpName, dst); renNew != nil {
+			_ = os.Rename(oldPath, dst)
+			return renNew
+		}
+		_ = os.Remove(oldPath)
+	}
+	cleanup = false
 	return nil
+}
+
+// replaceExecutable installs the downloaded binary over the running executable.
+// Handles: same-FS rename, cross-device copy, busy binary swap, and sudo when needed.
+func replaceExecutable(tmpPath, executablePath string) error {
+	// 1) Fast path: rename when both paths share a filesystem.
+	if err := os.Rename(tmpPath, executablePath); err == nil {
+		return nil
+	} else if isPermissionError(err) {
+		updateUserMessage(GetGlobalConfig(), "Update needs elevated permissions to replace the installed binary.")
+		if sudoErr := installExecutableWithSudo(tmpPath, executablePath); sudoErr != nil {
+			return sudoErr
+		}
+		_ = os.Remove(tmpPath)
+		return nil
+	} else if !isCrossDeviceError(err) {
+		// Unexpected rename failure — still try copy-into-place before giving up.
+		Log(fmt.Sprintf("rename to %s failed (%v); trying copy replace", executablePath, err))
+	}
+
+	// 2) Cross-device (or other rename failure): copy onto dest filesystem then swap.
+	if err := copyFileReplace(tmpPath, executablePath); err == nil {
+		_ = os.Remove(tmpPath)
+		return nil
+	} else if isPermissionError(err) {
+		updateUserMessage(GetGlobalConfig(), "Update needs elevated permissions to replace the installed binary.")
+		if sudoErr := installExecutableWithSudo(tmpPath, executablePath); sudoErr != nil {
+			return fmt.Errorf("failed to replace executable: %w", sudoErr)
+		}
+		_ = os.Remove(tmpPath)
+		return nil
+	} else {
+		// Last resort: sudo install from original temp (covers weird FS layouts).
+		if isCrossDeviceError(err) || runtime.GOOS != "windows" {
+			Log(fmt.Sprintf("copy replace failed (%v); trying sudo", err))
+			updateUserMessage(GetGlobalConfig(), "Update needs elevated permissions to replace the installed binary.")
+			if sudoErr := installExecutableWithSudo(tmpPath, executablePath); sudoErr == nil {
+				_ = os.Remove(tmpPath)
+				return nil
+			}
+		}
+		return fmt.Errorf("failed to replace executable: %w", err)
+	}
 }

@@ -447,10 +447,11 @@ func UpdateCurd(repo, fileName string) error {
 	// GitHub release URL for curd
 	url := fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", repo, binaryName)
 
-	// Temporary path for the downloaded curd executable (prefer same dir when writable)
-	tmpPath := executablePath + ".tmp"
-	if tmpDir := os.TempDir(); tmpDir != "" {
-		tmpPath = filepath.Join(tmpDir, "curd-update-"+binaryName)
+	// Prefer a temp file next to the executable (same filesystem → atomic rename).
+	// Fall back to OS temp dir when the install dir is not writable (e.g. /usr/bin).
+	tmpPath, out, err := createUpdateTempFile(executablePath, binaryName)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %v", err)
 	}
 
 	// Download the curd executable
@@ -460,19 +461,17 @@ func UpdateCurd(repo, fileName string) error {
 	}
 	resp, err := client.Get(url)
 	if err != nil {
+		out.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to download file: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Check if the download was successful
 	if resp.StatusCode != http.StatusOK {
+		out.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to download file: received status code %d", resp.StatusCode)
-	}
-
-	// Create a new temporary file
-	out, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %v", err)
 	}
 
 	// Copy the downloaded content to the temporary file
