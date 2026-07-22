@@ -780,7 +780,7 @@ func RemapAnimeProviderOnEpisodeFailure(config *CurdConfig, anime *Anime, anilis
 		return false
 	}
 
-	CurdOut("Could not get an episode link with the current provider mapping.")
+	CurdOut("Wrong match is common — search again and pick the right title.")
 	anime.ProviderId = ""
 	anime.ProviderName = ""
 	anime.Ep.NextEpisode = NextEpisode{}
@@ -793,19 +793,183 @@ func RemapAnimeProviderOnEpisodeFailure(config *CurdConfig, anime *Anime, anilis
 	return outcome == ProviderMappingOK
 }
 
-func promptEpisodeLinkFailureRecovery(config *CurdConfig) string {
-	selected, err := promptSelect([]SelectionOption{
-		{Key: "remap", Label: "Search providers again"},
-		{Key: "episode", Label: "Try a different episode number"},
-		{Key: "quit", Label: "Cancel playback"},
+// episodeLinkFailureRecoveryOptions builds ranked recovery actions for a dead-end
+// after preferred (and optional alternate) resolve already failed.
+// Labels are numbered so DynamicSelect's alphabetical sort preserves priority.
+func episodeLinkFailureRecoveryOptions(preferredMode string, includeAudio bool) []SelectionOption {
+	preferredMode = normalizeTranslationType(preferredMode)
+	alternateMode := alternateTranslationType(preferredMode)
+
+	options := []SelectionOption{
+		{Key: "remap", Label: "1. Search for this anime again"},
+	}
+	next := 2
+	if includeAudio {
+		options = append(options, SelectionOption{
+			Key:   "audio",
+			Label: fmt.Sprintf("%d. Try other audio (%s)", next, alternateMode),
+		})
+		next++
+	}
+	options = append(options, SelectionOption{
+		Key:   "episode",
+		Label: fmt.Sprintf("%d. Change episode number (if this one is wrong)", next),
 	})
+	return options
+}
+
+func episodeLinkFailureDiagnosis(config *CurdConfig, anime *Anime, lastErr error) string {
+	title := "this anime"
+	if anime != nil {
+		if name := strings.TrimSpace(GetAnimeName(*anime)); name != "" {
+			title = name
+		}
+	}
+
+	epNo := 0
+	if anime != nil {
+		epNo = anime.Ep.Number
+	}
+
+	mode := "sub"
+	if config != nil {
+		mode = normalizeTranslationType(config.SubOrDub)
+	}
+
+	providers := configuredProviderNames(config)
+	tried := "none"
+	if len(providers) > 0 {
+		tried = strings.Join(providers, ", ")
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Couldn't find Episode %d (%s) for %q\nTried: %s", epNo, mode, title, tried)
+	if lastErr != nil {
+		reason := strings.TrimSpace(lastErr.Error())
+		if reason != "" {
+			// Keep diagnosis readable — one short reason line.
+			if len(reason) > 160 {
+				reason = reason[:157] + "..."
+			}
+			fmt.Fprintf(&b, "\nReason: %s", reason)
+		}
+	}
+	return b.String()
+}
+
+// promptEpisodeLinkFailureRecovery shows a diagnosed dead-end after full resolve
+// failure. Returns: remap | audio | episode | back
+// DynamicSelect still injects Back/Quit; both map to "back" (single exit path).
+func promptEpisodeLinkFailureRecovery(config *CurdConfig, anime *Anime, lastErr error, includeAudio bool) string {
+	preferredMode := "sub"
+	if config != nil {
+		preferredMode = normalizeTranslationType(config.SubOrDub)
+	}
+
+	CurdOut(episodeLinkFailureDiagnosis(config, anime, lastErr))
+
+	selected, err := promptSelect(episodeLinkFailureRecoveryOptions(preferredMode, includeAudio))
 	if err != nil {
-		return "quit"
+		return "back"
 	}
-	if selected.Key == "-1" || selected.Key == "-2" {
-		return "quit"
+	switch selected.Key {
+	case "remap", "audio", "episode":
+		return selected.Key
+	case "-1", "-2", "quit", "back", "":
+		return "back"
+	default:
+		return "back"
 	}
-	return selected.Key
+}
+
+// resolveEpisodeLinksWithRecovery runs preferred-first playback resolve and only
+// after that fails presents the diagnosed recovery menu. Returns ok=false when
+// the user backs out.
+func resolveEpisodeLinksWithRecovery(config *CurdConfig, anime *Anime, anilistEntry *Entry, allowAnimepaheReselect bool) (ProviderEpisodeResult, bool) {
+	if config == nil || anime == nil {
+		return ProviderEpisodeResult{}, false
+	}
+
+	var lastErr error
+	includeAudio := true
+	attemptedAnimepaheReselect := false
+
+	for {
+		result, err := ResolveEpisodeURLForPlayback(*config, anime, anime.Ep.Number)
+		if err == nil && len(result.Links) > 0 {
+			return result, true
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("no episode links found")
+		}
+		Log(fmt.Sprintf("ResolveEpisodeURLForPlayback failed for ep %d: %v", anime.Ep.Number, lastErr))
+
+		// One-shot Animepahe stale-mapping reselect (tracked path helper).
+		if allowAnimepaheReselect && !attemptedAnimepaheReselect {
+			attemptedAnimepaheReselect = true
+			if reselectProviderAnime(config, anime, lastErr) {
+				result, err = ResolveEpisodeURLForPlayback(*config, anime, anime.Ep.Number)
+				if err == nil && len(result.Links) > 0 {
+					Log(fmt.Sprintf("Successfully retrieved %s/%s episode link after provider reselect", result.ProviderName, result.Mode))
+					return result, true
+				}
+				if err != nil {
+					lastErr = err
+				} else {
+					lastErr = fmt.Errorf("no episode links found after provider reselect")
+				}
+				Log(fmt.Sprintf("ResolveEpisodeURL still failed after provider reselect: %v", lastErr))
+			}
+		}
+
+		switch promptEpisodeLinkFailureRecovery(config, anime, lastErr, includeAudio) {
+		case "remap":
+			if RemapAnimeProviderOnEpisodeFailure(config, anime, anilistEntry) {
+				// Full preferred-first resolve again after remap.
+				continue
+			}
+			lastErr = fmt.Errorf("provider remap did not produce a new mapping")
+		case "audio":
+			// Explicit re-offer of alternate mode (user may have declined earlier).
+			altResult, altErr := ResolveEpisodeURLAlternateModeWithPrompt(*config, anime, anime.Ep.Number, nil)
+			if altErr == nil && len(altResult.Links) > 0 {
+				return altResult, true
+			}
+			if altErr != nil {
+				lastErr = altErr
+				if strings.Contains(strings.ToLower(altErr.Error()), "no ") &&
+					strings.Contains(strings.ToLower(altErr.Error()), "streams available") {
+					includeAudio = false
+				}
+			} else {
+				lastErr = fmt.Errorf("no %s streams available", alternateTranslationType(config.SubOrDub))
+				includeAudio = false
+			}
+			CurdOut("Still no playable stream after trying other audio.")
+		case "episode":
+			episodePrompt := "Change episode number (if this one is wrong)"
+			providerName, providerID := AnimeProviderID(anime)
+			if providerID != "" {
+				if episodeList, listErr := EpisodesList(QualifyProviderID(providerName, providerID), config.SubOrDub); listErr == nil && len(episodeList) > 0 {
+					episodePrompt = fmt.Sprintf("Change episode number (provider lists up to %v)", episodeList[len(episodeList)-1])
+				}
+			}
+			episodeNumber, promptErr := promptPositiveEpisodeNumber(config, episodePrompt)
+			if promptErr != nil {
+				Log("Invalid episode input: " + promptErr.Error())
+				CurdOut("Invalid episode number")
+				continue
+			}
+			anime.Ep.Number = episodeNumber
+			anime.Ep.NextEpisode = NextEpisode{}
+			// Re-run full preferred-first resolve for the new episode.
+			continue
+		default:
+			return ProviderEpisodeResult{}, false
+		}
+	}
 }
 
 func ResolveUntrackedProviderSearch(config *CurdConfig, initialQuery string) (providerID, providerName string, back bool, err error) {

@@ -473,41 +473,12 @@ func WatchUntracked(userCurdConfig *CurdConfig) {
 			}
 			anime.Ep.NextEpisode = NextEpisode{}
 		} else {
-			// Resolve links: preferred SubOrDub is exhausted before any audio-mode prompt.
-			resolvedLink, err := ResolveEpisodeURLForPlayback(*userCurdConfig, &anime, anime.Ep.Number)
-			if err != nil {
-				Log(fmt.Sprintf("Failed to get episode link: %v", err))
-				switch promptEpisodeLinkFailureRecovery(userCurdConfig) {
-				case "remap":
-					if RemapAnimeProviderOnEpisodeFailure(userCurdConfig, &anime, nil) {
-						continue
-					}
-				case "episode":
-					episodePrompt := "Enter the episode number"
-					providerName, providerID := AnimeProviderID(&anime)
-					if providerID != "" {
-						if episodeList, listErr := EpisodesList(QualifyProviderID(providerName, providerID), userCurdConfig.SubOrDub); listErr == nil && len(episodeList) > 0 {
-							episodePrompt = fmt.Sprintf("Enter the episode (%v episodes)", episodeList[len(episodeList)-1])
-						}
-					}
-					episodeNumber, promptErr := promptPositiveEpisodeNumber(userCurdConfig, episodePrompt)
-					if promptErr != nil {
-						Log(fmt.Sprintf("Invalid episode number: %v", promptErr))
-						CurdOut("Invalid episode number")
-						continue
-					}
-					anime.Ep.Number = episodeNumber
-					continue
-				default:
-					ExitCurd(nil)
-				}
-				continue
+			// Preferred-first resolve; diagnosed recovery only after that fails.
+			resolvedLink, ok := resolveEpisodeLinksWithRecovery(userCurdConfig, &anime, nil, true)
+			if !ok {
+				ExitCurd(nil)
 			}
-			link := resolvedLink.Links
-			if len(link) == 0 {
-				ExitCurd(fmt.Errorf("No episode links found"))
-			}
-			anime.Ep.Links = link
+			anime.Ep.Links = resolvedLink.Links
 			applyStreamPlaybackHints(&anime, anime.Ep.Links, resolvedLink.LinkHints)
 		}
 

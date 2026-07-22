@@ -1318,96 +1318,23 @@ func StartCurd(userCurdConfig *CurdConfig, anime *Anime) string {
 			anime.ProviderId = anime.Ep.NextEpisode.ProviderId
 		}
 	} else {
-		// Get episode link
-		episodeResult, err := ResolveEpisodeURLForPlayback(*userCurdConfig, anime, anime.Ep.Number)
-		link := episodeResult.Links
-		if len(link) > 0 {
-			Log(fmt.Sprintf("Links details from %s/%s: %+v", episodeResult.ProviderName, episodeResult.Mode, link))
+		// Preferred-first resolve; diagnosed recovery only after that fails.
+		episodeResult, ok := resolveEpisodeLinksWithRecovery(userCurdConfig, anime, nil, true)
+		if !ok {
+			RestoreScreen()
+			return ""
 		}
-		if err != nil {
-			linkErr := err
-			Log(fmt.Sprintf("ResolveEpisodeURL failed: %v", linkErr))
-			if reselectProviderAnime(userCurdConfig, anime, linkErr) {
-				episodeResult, err = ResolveEpisodeURLForPlayback(*userCurdConfig, anime, anime.Ep.Number)
-				link = episodeResult.Links
-				if err == nil {
-					Log(fmt.Sprintf("Successfully retrieved %s/%s episode link after provider reselect. Links count: %d", episodeResult.ProviderName, episodeResult.Mode, len(link)))
-					anime.Ep.Links = link
-					applyStreamPlaybackHints(anime, anime.Ep.Links, episodeResult.LinkHints)
-					goto episodeLinksReady
-				}
-				linkErr = err
-				Log(fmt.Sprintf("ResolveEpisodeURL still failed after provider reselect: %v", linkErr))
-			}
-			for {
-				switch promptEpisodeLinkFailureRecovery(userCurdConfig) {
-				case "remap":
-					if RemapAnimeProviderOnEpisodeFailure(userCurdConfig, anime, nil) {
-						episodeResult, err = ResolveEpisodeURLForPlayback(*userCurdConfig, anime, anime.Ep.Number)
-						link = episodeResult.Links
-						if err == nil && len(link) > 0 {
-							anime.Ep.Links = link
-							applyStreamPlaybackHints(anime, anime.Ep.Links, episodeResult.LinkHints)
-							goto episodeLinksReady
-						}
-						if err != nil {
-							linkErr = err
-							Log(fmt.Sprintf("ResolveEpisodeURL failed after provider remap: %v", linkErr))
-						}
-					}
-				case "episode":
-					episodeProviderName, episodeProviderID := AnimeProviderID(anime)
-					episodeList, listErr := EpisodesList(QualifyProviderID(episodeProviderName, episodeProviderID), userCurdConfig.SubOrDub)
-					if listErr != nil {
-						CurdOut("No episode list found: " + listErr.Error())
-						Log(fmt.Sprintf("EpisodesList failed: %v", listErr))
-						continue
-					}
-					if len(episodeList) == 0 {
-						CurdOut("No episodes were returned by the current provider for this anime.")
-						Log(fmt.Sprintf("EpisodesList returned no episodes for provider %s and id %s after ResolveEpisodeURL error: %v", episodeProviderName, episodeProviderID, linkErr))
-						continue
-					}
-					episodeNumber, promptErr := promptPositiveEpisodeNumber(userCurdConfig, fmt.Sprintf("Enter the episode (%v episodes)", episodeList[len(episodeList)-1]))
-					if promptErr != nil {
-						Log("Invalid episode input: " + promptErr.Error())
-						CurdOut("Invalid episode number")
-						continue
-					}
-					anime.Ep.Number = episodeNumber
-					episodeResult, err = ResolveEpisodeURLForPlayback(*userCurdConfig, anime, anime.Ep.Number)
-					link = episodeResult.Links
-					if err == nil && len(link) > 0 {
-						anime.Ep.Links = link
-						applyStreamPlaybackHints(anime, anime.Ep.Links, episodeResult.LinkHints)
-						goto episodeLinksReady
-					}
-					if err != nil {
-						linkErr = err
-						Log(fmt.Sprintf("ResolveEpisodeURL failed for episode %d: %v", anime.Ep.Number, linkErr))
-					} else {
-						CurdOut("Failed to get episode link")
-					}
-				default:
-					RestoreScreen()
-					return ""
-				}
-			}
-		} else {
-			Log(fmt.Sprintf("Successfully retrieved %s/%s episode link on first try. Links count: %d", episodeResult.ProviderName, episodeResult.Mode, len(link)))
-		}
-		anime.Ep.Links = link
+		Log(fmt.Sprintf("Successfully retrieved %s/%s episode link. Links count: %d", episodeResult.ProviderName, episodeResult.Mode, len(episodeResult.Links)))
+		anime.Ep.Links = episodeResult.Links
 		applyStreamPlaybackHints(anime, anime.Ep.Links, episodeResult.LinkHints)
 	}
 
-episodeLinksReady:
 	if len(anime.Ep.Links) == 0 {
 		CurdOut("No episode links found")
 		RestoreScreen()
 		return ""
-	} else {
-		Log(fmt.Sprintf("Episode links validation passed. Found %d links", len(anime.Ep.Links)))
 	}
+	Log(fmt.Sprintf("Episode links validation passed. Found %d links", len(anime.Ep.Links)))
 
 	// Modify the goroutine in main.go where next episode links are fetched
 	// Get next episode link in parallel
