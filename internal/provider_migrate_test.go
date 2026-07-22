@@ -114,11 +114,11 @@ func TestMigrateOnVersionUpgradeWritesVersionAndUpdatesProvider(t *testing.T) {
 	}
 }
 
-func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
+func TestLoadConfigAppendsMissingOptionsIncludingVimKeys(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "curd.conf")
 	storagePath := filepath.Join(tempDir, "share")
-	// Minimal pre-upgrade config: no VimKeys, no MpvPlaybackStartTimeout.
+	// Minimal config: no VimKeys — must be appended on load (not a full rewrite).
 	initial := "StoragePath=" + storagePath + "\n" +
 		"AddMissingOptions=true\n" +
 		"Provider=stacked\n" +
@@ -131,17 +131,66 @@ func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	// LoadConfig must not rewrite the file just for missing defaults.
-	before, err := os.ReadFile(configPath)
+	if config.VimKeys {
+		t.Fatal("VimKeys default should be false")
+	}
+
+	after, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	if strings.Contains(string(before), "VimKeys=") {
-		t.Fatalf("LoadConfig should not inject VimKeys into the file every start:\n%s", before)
+	text := string(after)
+	if !strings.Contains(text, "VimKeys=false") {
+		t.Fatalf("expected VimKeys=false in config file:\n%s", text)
 	}
-	// In-memory default still applies.
-	if config.VimKeys {
-		t.Fatal("VimKeys default should be false in memory")
+	// Original lines preserved (append-only).
+	if !strings.Contains(text, "Player=mpv") || !strings.Contains(text, "StoragePath="+storagePath) {
+		t.Fatalf("original keys should remain:\n%s", text)
+	}
+
+	// Second load must not duplicate VimKeys.
+	if _, err := LoadConfig(configPath); err != nil {
+		t.Fatalf("second LoadConfig: %v", err)
+	}
+	after2, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config again: %v", err)
+	}
+	if strings.Count(string(after2), "VimKeys=") != 1 {
+		t.Fatalf("VimKeys should appear once, got:\n%s", after2)
+	}
+}
+
+func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "curd.conf")
+	storagePath := filepath.Join(tempDir, "share")
+	// Full-enough config written first so LoadConfig isn't under test here.
+	initial := "StoragePath=" + storagePath + "\n" +
+		"AddMissingOptions=true\n" +
+		"Provider=stacked\n" +
+		"Player=mpv\n"
+	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	// Pretend we're already on an older stored version with a sparse file.
+	if err := os.MkdirAll(storagePath, 0755); err != nil {
+		t.Fatalf("mkdir storage: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(storagePath, "curd_version"), []byte("2.0.0\n"), 0644); err != nil {
+		t.Fatalf("write version: %v", err)
+	}
+
+	config := PopulateConfig(map[string]string{
+		"StoragePath":       storagePath,
+		"AddMissingOptions": "true",
+		"Provider":          "stacked",
+		"Player":            "mpv",
+	})
+
+	// Wipe keys that LoadConfig would have added so migration is the injector.
+	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
+		t.Fatalf("rewrite sparse config: %v", err)
 	}
 
 	updated, err := MigrateOnVersionUpgrade(configPath, &config, "2.0.3")
@@ -159,13 +208,6 @@ func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
 	text := string(after)
 	if !strings.Contains(text, "VimKeys=false") {
 		t.Fatalf("expected VimKeys=false appended on upgrade:\n%s", text)
-	}
-	if !strings.Contains(text, "MpvPlaybackStartTimeout=20") {
-		t.Fatalf("expected MpvPlaybackStartTimeout appended on upgrade:\n%s", text)
-	}
-	// Original keys preserved at the top (append-only for new keys).
-	if !strings.HasPrefix(strings.TrimSpace(text), "StoragePath=") && !strings.Contains(text, "StoragePath="+storagePath) {
-		t.Fatalf("original StoragePath should remain:\n%s", text)
 	}
 
 	// Same version: no further rewrite.

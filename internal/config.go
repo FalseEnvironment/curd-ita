@@ -249,7 +249,7 @@ func LoadConfig(configPath string) (CurdConfig, error) {
 	_, hadTrackingConfigured := configMap["TrackingConfigured"]
 	legacyConfig := !createdConfig && !hadTrackingRemote && !hadTrackingConfigured
 
-	// fileMap = keys actually present on disk (never bulk-fill with all defaults).
+	// fileMap = keys actually present on disk.
 	// workMap = file keys + in-memory defaults for PopulateConfig.
 	fileMap := configMap
 	workMap := make(map[string]string, len(fileMap)+len(defaultConfigMap()))
@@ -283,8 +283,22 @@ func LoadConfig(configPath string) (CurdConfig, error) {
 		}
 	}
 
-	// Persist only real migrations (legacy tracking / provider normalize) — not every
-	// missing default. New defaults are appended once in MigrateOnVersionUpgrade.
+	// Append brand-new default keys (e.g. VimKeys) once when absent — never rewrite the
+	// whole file for them. After they're on disk, subsequent starts do nothing.
+	if addMissing && !createdConfig {
+		if added := injectMissingConfigDefaults(fileMap); len(added) > 0 {
+			// Keep workMap in sync with anything just injected.
+			for _, key := range added {
+				workMap[key] = fileMap[key]
+			}
+			if err := appendConfigKeys(configPath, fileMap, added); err != nil {
+				return CurdConfig{}, fmt.Errorf("error appending new config options: %v", err)
+			}
+			Log(fmt.Sprintf("Appended new config options: %s", strings.Join(added, ", ")))
+		}
+	}
+
+	// Persist legacy tracking / provider-token normalize (rewrite only those cases).
 	if addMissing && updated {
 		if err := SaveConfigToFile(configPath, fileMap); err != nil {
 			return CurdConfig{}, fmt.Errorf("error saving updated config file: %v", err)
