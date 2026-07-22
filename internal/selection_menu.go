@@ -149,8 +149,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// --- Vim-enabled selection: normal mode vs search mode ---
+		// Normal: hjkl/arrows move. Search (after /): like vim's / — every
+		// printable key including hjkl is part of the query; arrows/tab still move.
 		if vimKeys {
-			// Search mode: typing filters; j/k/arrows still navigate results.
 			if m.filterActive {
 				switch key {
 				case "esc":
@@ -164,11 +165,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.filter = m.filter[:len(m.filter)-1]
 						updateFilter = true
 					}
-				case "down", "j", "tab", "ctrl+n", "l", "right":
+				case "down", "tab", "ctrl+n":
 					m.moveSelectionDown()
-				case "up", "k", "shift+tab", "ctrl+p", "h", "left":
+				case "up", "shift+tab", "ctrl+p":
 					m.moveSelectionUp()
+				// left/right: optional result navigation without stealing hjkl
+				case "left":
+					m.moveSelectionUp()
+				case "right":
+					m.moveSelectionDown()
 				default:
+					// hjkl and all other printables go into the search query.
 					if len(key) == 1 && key >= " " && key <= "~" {
 						m.filter += key
 						updateFilter = true
@@ -279,11 +286,11 @@ func (m Model) View() string {
 	// Display the search prompt and filter with colors
 	if VimKeysEnabled(nil) {
 		if m.filterActive {
-			b.WriteString(titleStyle.Render("Search") + " (Esc: leave search · Enter: select · j/k: move):\n")
-			b.WriteString(filterLabelStyle.Render("Filter: ") +
+			b.WriteString(titleStyle.Render("Search") + " (type query · arrows move · Enter: select · Esc: normal):\n")
+			b.WriteString(filterLabelStyle.Render("/") +
 				filterTextStyle.Render(m.filter+"▌") + "\n\n")
 		} else {
-			b.WriteString(titleStyle.Render("Select") + " (j/k/h/l · / search · Enter · Esc):\n")
+			b.WriteString(titleStyle.Render("Select") + " (hjkl/arrows · / search · Enter · Esc):\n")
 			if m.filter != "" {
 				b.WriteString(filterLabelStyle.Render("Filter: ") +
 					filterTextStyle.Render(m.filter) + "\n\n")

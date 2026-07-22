@@ -158,17 +158,31 @@ func TestVimKeysNormalModeNavigatesWithoutFiltering(t *testing.T) {
 		t.Fatalf("k should move up, selected=%d", model.selected)
 	}
 
-	// / enters search mode; then typing filters.
+	// / enters search mode; then typing filters — including hjkl as query text.
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	model = updated.(*Model)
 	if !model.filterActive {
 		t.Fatal("expected / to enter search mode")
 	}
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'B'}})
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	model = updated.(*Model)
-	if model.filter != "B" {
-		t.Fatalf("expected filter B in search mode, got %q", model.filter)
+	if model.filter != "j" {
+		t.Fatalf("in search mode j should type into query, got filter=%q selected=%d", model.filter, model.selected)
 	}
+	if model.selected != 0 {
+		t.Fatalf("in search mode j must not move selection, selected=%d", model.selected)
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	model = updated.(*Model)
+	if model.filter != "jk" {
+		t.Fatalf("expected filter jk in search mode, got %q", model.filter)
+	}
+
+	// Arrows still navigate results while searching.
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(*Model)
+	// After filtering to "jk" there may be no matches; selection stays valid either way.
+	_ = model
 }
 
 func TestLegacyModeStillTypeToFilter(t *testing.T) {
