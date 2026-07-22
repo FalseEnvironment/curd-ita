@@ -17,7 +17,7 @@ var version string // Will be set by ldflags during build
 
 func resolvedVersion() string {
 	if version == "" {
-		return "2.0.4"
+		return "2.0.5"
 	}
 
 	return version
@@ -344,6 +344,12 @@ func main() {
 		anime.Ep.Player.SocketPath = internal.StartCurd(&userCurdConfig, &anime)
 		internal.Log(fmt.Sprint("Playback starting time: ", anime.Ep.Player.PlaybackTime))
 		internal.Log(anime.Ep.Player.SocketPath)
+
+		// After playback is running, lazily build MPV episode playlist / audio
+		// options while idle (no startup cost, no mid-buffer stutter).
+		if anime.Ep.Player.SocketPath != "" && anime.Ep.Player.SocketPath != "android-intent" {
+			internal.StartMPVPlaylistController(&userCurdConfig, &anime, anime.Ep.Player.SocketPath, skipLoopDone)
+		}
 
 		// Handle Android Intent external player
 		if anime.Ep.Player.SocketPath == "android-intent" {

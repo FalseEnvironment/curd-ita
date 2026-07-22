@@ -122,6 +122,8 @@ func configOptionsIntroducedInVersion() map[string]string {
 		"VimKeys":                 "2.0.3",
 		// 2.0.4 — idle background update checks
 		"CheckUpdates": "2.0.4",
+		// 2.0.5 — MPV episode playlist + alternate audio entries
+		"MpvEpisodePlaylist": "2.0.5",
 	}
 }
 

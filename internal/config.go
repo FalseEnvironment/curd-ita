@@ -64,6 +64,7 @@ type CurdConfig struct {
 	DiscordClientId            string   `config:"DiscordClientId"`
 	VimKeys                    bool     `config:"VimKeys"`
 	CheckUpdates               bool     `config:"CheckUpdates"`
+	MpvEpisodePlaylist         bool     `config:"MpvEpisodePlaylist"`
 	Provider                   string   `config:"Provider"`
 	DisabledProviders          string   `config:"DisabledProviders"`
 	ManualProviderSearch       bool     `config:"ManualProviderSearch"`
@@ -122,6 +123,7 @@ func defaultConfigMap() map[string]string {
 		"DiscordClientId":            "1287457464148820089",
 		"VimKeys":                    "false",
 		"CheckUpdates":               "true",
+		"MpvEpisodePlaylist":         "true",
 		"Provider":                   "stacked",
 		"DisabledProviders":          "[]",
 		"ManualProviderSearch":       "false",
