@@ -268,6 +268,51 @@ func pendingUpdateShouldPrompt(config *CurdConfig, currentVersion string, state 
 	return true
 }
 
+func formatLocalTime(t time.Time) string {
+	return t.In(time.Local).Format("Mon Jan 2 2006, 3:04 PM MST")
+}
+
+func buildUpdatePromptMessage(currentVersion string, state updatePendingState) (prompt, message string) {
+	from := normalizeReleaseVersion(currentVersion)
+	to := normalizeReleaseVersion(state.LatestVersion)
+	prompt = fmt.Sprintf("Update %s → %s", from, to)
+
+	var b strings.Builder
+	if state.ReleaseName != "" {
+		fmt.Fprintf(&b, "%s\n", state.ReleaseName)
+	}
+	fmt.Fprintf(&b, "Current: %s   Latest: %s\n", from, to)
+	if state.HTMLURL != "" {
+		fmt.Fprintf(&b, "%s\n", state.HTMLURL)
+	}
+	b.WriteString("\n")
+	b.WriteString(state.ReleaseNotes)
+	message = strings.TrimSpace(b.String())
+	// Rofi -mesg stays readable; keep a hard cap.
+	if runes := []rune(message); len(runes) > maxReleaseNotesRunes {
+		message = string(runes[:maxReleaseNotesRunes]) + "\n… (truncated)"
+	}
+	return prompt, message
+}
+
+// updateUserMessage prints a single status line. With Rofi mode, CurdOut becomes
+// notify-send — so we only send one short notification (or log) for status.
+func updateUserMessage(config *CurdConfig, msg string) {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return
+	}
+	Log(msg)
+	if config != nil && config.RofiSelection {
+		// One short desktop notification, not a barrage of CurdOut lines.
+		_ = exec.Command("notify-send", "-a", "Curd",
+			"-h", "string:x-canonical-private-synchronous:curd-update",
+			"Curd", msg).Run()
+		return
+	}
+	fmt.Println(msg)
+}
+
 // HandlePendingUpdatePrompt shows a previously detected update (from idle check).
 // Returns true if the caller should exit (user updated or chose to quit the session).
 func HandlePendingUpdatePrompt(config *CurdConfig, currentVersion string) bool {
@@ -279,63 +324,64 @@ func HandlePendingUpdatePrompt(config *CurdConfig, currentVersion string) bool {
 		return false
 	}
 
-	CurdOut("")
-	CurdOut(fmt.Sprintf("Update available: %s → %s", normalizeReleaseVersion(currentVersion), state.LatestVersion))
-	if state.ReleaseName != "" {
-		CurdOut(state.ReleaseName)
-	}
-	if state.HTMLURL != "" {
-		CurdOut(state.HTMLURL)
-	}
-	CurdOut("")
-	CurdOut("Release notes:")
-	CurdOut(state.ReleaseNotes)
-	CurdOut("")
-
-	selected, err := promptSelect([]SelectionOption{
+	options := []SelectionOption{
 		{Key: "update", Label: "Update now"},
 		{Key: "later", Label: "Remind me later"},
 		{Key: "skip", Label: "Skip this version"},
 		{Key: "disable", Label: "Turn off automatic update checks"},
 		{Key: "continue", Label: "Continue without updating"},
-	})
+	}
+	prompt, message := buildUpdatePromptMessage(currentVersion, state)
+
+	var selected SelectionOption
+	var err error
+	if config.RofiSelection {
+		// All details go in Rofi -mesg; zero notify-send spam for notes.
+		selected, err = RofiSelectWithMessage(options, false, prompt, message)
+	} else {
+		fmt.Println(prompt)
+		fmt.Println(message)
+		fmt.Println()
+		selected, err = promptSelect(options)
+	}
 	if err != nil || selected.Key == "-1" || selected.Key == "-2" || selected.Key == "continue" || selected.Key == "" {
 		return false
 	}
 
 	switch selected.Key {
 	case "update":
-		CurdOut("Downloading and installing update…")
+		updateUserMessage(config, "Downloading and installing update…")
 		if err := UpdateCurd(defaultUpdateRepo, "curd"); err != nil {
-			CurdOut(fmt.Sprintf("Update failed: %v", err))
+			updateUserMessage(config, fmt.Sprintf("Update failed: %v", err))
 			Log(fmt.Sprintf("Update failed: %v", err))
 			return false
 		}
 		state.Available = false
 		state.RemindAfter = ""
 		_ = saveUpdatePendingState(config.StoragePath, state)
-		CurdOut(fmt.Sprintf("Updated to %s. Please restart curd.", state.LatestVersion))
+		updateUserMessage(config, fmt.Sprintf("Updated to %s. Please restart curd.", state.LatestVersion))
 		return true
 	case "later":
-		state.RemindAfter = time.Now().Add(defaultRemindLaterDuration).UTC().Format(time.RFC3339)
+		until := time.Now().Add(defaultRemindLaterDuration)
+		state.RemindAfter = until.UTC().Format(time.RFC3339)
 		state.Available = true
 		_ = saveUpdatePendingState(config.StoragePath, state)
-		CurdOut(fmt.Sprintf("Will remind again after %s.", state.RemindAfter))
+		updateUserMessage(config, fmt.Sprintf("Will remind again after %s.", formatLocalTime(until)))
 		return false
 	case "skip":
 		state.SkippedVersion = state.LatestVersion
 		state.Available = false
 		state.RemindAfter = ""
 		_ = saveUpdatePendingState(config.StoragePath, state)
-		CurdOut(fmt.Sprintf("Skipping version %s.", state.LatestVersion))
+		updateUserMessage(config, fmt.Sprintf("Skipping version %s.", state.LatestVersion))
 		return false
 	case "disable":
 		if err := setConfigBoolOption(GlobalConfigPath, "CheckUpdates", false); err != nil {
-			CurdOut(fmt.Sprintf("Could not write config: %v", err))
+			updateUserMessage(config, fmt.Sprintf("Could not write config: %v", err))
 			Log(fmt.Sprintf("disable CheckUpdates: %v", err))
 		} else {
 			config.CheckUpdates = false
-			CurdOut("Automatic update checks disabled (CheckUpdates=false).")
+			updateUserMessage(config, "Automatic update checks disabled (CheckUpdates=false).")
 		}
 		state.Available = false
 		_ = saveUpdatePendingState(config.StoragePath, state)
@@ -443,7 +489,7 @@ func replaceExecutable(tmpPath, executablePath string) error {
 	}
 
 	// Permission denied — e.g. installed to /usr/local/bin. Ask for sudo.
-	CurdOut("Update needs elevated permissions to replace the installed binary.")
+	updateUserMessage(GetGlobalConfig(), "Update needs elevated permissions to replace the installed binary.")
 	if err := installExecutableWithSudo(tmpPath, executablePath); err != nil {
 		return err
 	}

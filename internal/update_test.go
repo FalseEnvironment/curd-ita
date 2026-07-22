@@ -124,3 +124,30 @@ func TestUpdatePendingPath(t *testing.T) {
 		t.Fatalf("unexpected path %q", path)
 	}
 }
+
+func TestFormatLocalTimeUsesLocalZone(t *testing.T) {
+	// Fixed instant: 2026-07-23T20:24:06Z
+	utc := time.Date(2026, 7, 23, 20, 24, 6, 0, time.UTC)
+	got := formatLocalTime(utc)
+	if strings.Contains(got, "2026-07-23T20:24:06Z") {
+		t.Fatalf("expected local display, not RFC3339 Z form: %q", got)
+	}
+	if !strings.Contains(got, "2026") || !strings.Contains(got, ":") {
+		t.Fatalf("unexpected local format %q", got)
+	}
+}
+
+func TestBuildUpdatePromptMessage(t *testing.T) {
+	prompt, msg := buildUpdatePromptMessage("2.0.1", updatePendingState{
+		LatestVersion: "2.0.2",
+		ReleaseName:   "Curd v2.0.2",
+		HTMLURL:       "https://example.com",
+		ReleaseNotes:  "fixed stuff",
+	})
+	if !strings.Contains(prompt, "2.0.1") || !strings.Contains(prompt, "2.0.2") {
+		t.Fatalf("prompt=%q", prompt)
+	}
+	if !strings.Contains(msg, "fixed stuff") || !strings.Contains(msg, "https://example.com") {
+		t.Fatalf("message=%q", msg)
+	}
+}

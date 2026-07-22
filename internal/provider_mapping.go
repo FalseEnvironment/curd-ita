@@ -866,9 +866,18 @@ func promptEpisodeLinkFailureRecovery(config *CurdConfig, anime *Anime, lastErr 
 		preferredMode = normalizeTranslationType(config.SubOrDub)
 	}
 
-	CurdOut(episodeLinkFailureDiagnosis(config, anime, lastErr))
+	diagnosis := episodeLinkFailureDiagnosis(config, anime, lastErr)
+	options := episodeLinkFailureRecoveryOptions(preferredMode, includeAudio)
 
-	selected, err := promptSelect(episodeLinkFailureRecoveryOptions(preferredMode, includeAudio))
+	var selected SelectionOption
+	var err error
+	if config != nil && config.RofiSelection {
+		// Put diagnosis in Rofi -mesg — avoid one notify-send per CurdOut line.
+		selected, err = RofiSelectWithMessage(options, false, "Playback recovery", diagnosis)
+	} else {
+		fmt.Println(diagnosis)
+		selected, err = promptSelect(options)
+	}
 	if err != nil {
 		return "back"
 	}

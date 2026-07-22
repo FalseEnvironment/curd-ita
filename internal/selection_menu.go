@@ -669,13 +669,30 @@ func RofiSelect(options []SelectionOption, isHomeMenu bool) (SelectionOption, er
 	return RofiSelectWithRefresh(options, isHomeMenu, nil)
 }
 
+// RofiSelectWithMessage shows a Rofi dmenu with an optional -mesg banner (for
+// release notes, error diagnosis, etc.) so callers do not need notify-send spam.
+func RofiSelectWithMessage(options []SelectionOption, isHomeMenu bool, prompt, message string) (SelectionOption, error) {
+	return rofiSelectInternal(options, isHomeMenu, nil, prompt, message)
+}
+
 func RofiSelectWithRefresh(options []SelectionOption, isHomeMenu bool, refreshConfig *SelectionRefreshConfig) (SelectionOption, error) {
+	return rofiSelectInternal(options, isHomeMenu, refreshConfig, "Select", "")
+}
+
+func rofiSelectInternal(options []SelectionOption, isHomeMenu bool, refreshConfig *SelectionRefreshConfig, prompt, message string) (SelectionOption, error) {
 	currentOptions := options
+	if strings.TrimSpace(prompt) == "" {
+		prompt = "Select"
+	}
 
 	for {
 		optionsString := buildRofiOptionsString(currentOptions, isHomeMenu)
 		configPath := filepath.Join(GetStoragePath(), "selectanime.rasi")
-		cmd := exec.Command("rofi", "-dmenu", "-theme", configPath, "-i", "-p", "Select")
+		args := []string{"-dmenu", "-theme", configPath, "-i", "-p", prompt}
+		if msg := strings.TrimSpace(message); msg != "" {
+			args = append(args, "-mesg", msg)
+		}
+		cmd := exec.Command("rofi", args...)
 		cmd.Stdin = strings.NewReader(optionsString)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
