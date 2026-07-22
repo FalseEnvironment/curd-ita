@@ -283,20 +283,10 @@ func LoadConfig(configPath string) (CurdConfig, error) {
 		}
 	}
 
-	// Append brand-new default keys (e.g. VimKeys) once when absent — never rewrite the
-	// whole file for them. After they're on disk, subsequent starts do nothing.
-	if addMissing && !createdConfig {
-		if added := injectMissingConfigDefaults(fileMap); len(added) > 0 {
-			// Keep workMap in sync with anything just injected.
-			for _, key := range added {
-				workMap[key] = fileMap[key]
-			}
-			if err := appendConfigKeys(configPath, fileMap, added); err != nil {
-				return CurdConfig{}, fmt.Errorf("error appending new config options: %v", err)
-			}
-			Log(fmt.Sprintf("Appended new config options: %s", strings.Join(added, ", ")))
-		}
-	}
+	// New config keys are NOT bulk-appended here. Only MigrateOnVersionUpgrade
+	// injects options registered in configOptionsIntroducedInVersion() for the
+	// versions the user actually crossed — so sparse configs never get every
+	// historical default dumped in on a normal launch.
 
 	// Persist legacy tracking / provider-token normalize (rewrite only those cases).
 	if addMissing && updated {

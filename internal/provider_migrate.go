@@ -106,25 +106,58 @@ func writeStoredCurdVersion(storagePath, version string) error {
 	return os.WriteFile(storageVersionFilePath(storagePath), []byte(version+"\n"), 0644)
 }
 
-// injectMissingConfigDefaults adds any defaultConfigMap keys that are absent from
-// configMap. Returns the sorted list of newly injected keys.
-func injectMissingConfigDefaults(configMap map[string]string) []string {
+// configOptionsIntroducedInVersion maps config keys to the first curd release that
+// introduced them. Only these keys are eligible for automatic append on upgrade.
+// Baseline options (Player, StoragePath, …) are NOT listed — they only appear via
+// createDefaultConfig for brand-new installs, never re-appended into sparse configs.
+//
+// When adding a new option:
+//  1. Add it to CurdConfig + defaultConfigMap()
+//  2. Register it here under the release version that ships it
+//  3. Bump VERSION.txt so MigrateOnVersionUpgrade runs for existing users
+func configOptionsIntroducedInVersion() map[string]string {
+	return map[string]string{
+		// 2.0.3 — playback fallback timeout + vim selection motions
+		"MpvPlaybackStartTimeout": "2.0.3",
+		"VimKeys":                 "2.0.3",
+	}
+}
+
+// injectConfigOptionsSince appends defaults for options introduced in versions
+// (fromVersion, toVersion] that are still missing from configMap.
+// Example: from 2.0.2 → 2.0.3 injects only keys introduced in 2.0.3, not every
+// historical default.
+func injectConfigOptionsSince(configMap map[string]string, fromVersion, toVersion string) []string {
 	if configMap == nil {
 		return nil
 	}
 	defaults := defaultConfigMap()
-	keys := make([]string, 0, len(defaults))
-	for key := range defaults {
+	introduced := configOptionsIntroducedInVersion()
+
+	keys := make([]string, 0, len(introduced))
+	for key := range introduced {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
 	added := make([]string, 0)
 	for _, key := range keys {
+		since := introduced[key]
+		// Only options born after the user's previous version and at/before this release.
+		if !versionLess(fromVersion, since) {
+			continue // introduced at or before fromVersion — user already "passed" that release
+		}
+		if !versionLessOrEqual(since, toVersion) {
+			continue // not shipped yet in toVersion
+		}
 		if _, exists := configMap[key]; exists {
 			continue
 		}
-		configMap[key] = defaults[key]
+		value, ok := defaults[key]
+		if !ok {
+			continue
+		}
+		configMap[key] = value
 		added = append(added, key)
 	}
 	return added
@@ -155,9 +188,9 @@ func appendConfigKeys(configPath string, configMap map[string]string, keys []str
 }
 
 // MigrateOnVersionUpgrade updates stored state and config when curd is upgraded.
-// On version change it injects any new default config options (append-only) and
-// runs provider migrations. Same-version launches do not rewrite the config file
-// just to fill defaults — that avoids churning user config every start.
+// On version change it appends only config options registered as introduced in
+// versions (storedVersion, appVersion], then runs provider migrations.
+// Same-version launches do not rewrite the config file.
 // Returns whether the config file was updated.
 func MigrateOnVersionUpgrade(configPath string, config *CurdConfig, appVersion string) (bool, error) {
 	if config == nil {
@@ -176,8 +209,9 @@ func MigrateOnVersionUpgrade(configPath string, config *CurdConfig, appVersion s
 
 	storedVersion := readStoredCurdVersion(storagePath)
 	configUpdated := false
+	versionChanged := storedVersion != appVersion
 
-	if storedVersion != appVersion && strings.TrimSpace(configPath) != "" {
+	if versionChanged && strings.TrimSpace(configPath) != "" {
 		configMap, err := LoadConfigFromFile(configPath)
 		if err != nil {
 			return false, err
@@ -195,12 +229,13 @@ func MigrateOnVersionUpgrade(configPath string, config *CurdConfig, appVersion s
 		}
 
 		if addMissing {
-			if added := injectMissingConfigDefaults(configMap); len(added) > 0 {
+			if added := injectConfigOptionsSince(configMap, storedVersion, appVersion); len(added) > 0 {
 				if err := appendConfigKeys(configPath, configMap, added); err != nil {
 					return false, fmt.Errorf("append new config options: %w", err)
 				}
 				configUpdated = true
-				Log(fmt.Sprintf("Injected new config options on upgrade to %s: %s", appVersion, strings.Join(added, ", ")))
+				Log(fmt.Sprintf("Injected config options for upgrade %s → %s: %s",
+					storedVersion, appVersion, strings.Join(added, ", ")))
 			}
 		}
 
@@ -217,7 +252,7 @@ func MigrateOnVersionUpgrade(configPath string, config *CurdConfig, appVersion s
 		next := PopulateConfig(configMap)
 		normalizeTrackingConfig(&next)
 		*config = next
-	} else if storedVersion != appVersion {
+	} else if versionChanged {
 		// No config path, still run in-memory provider migration.
 		if nextProvider, changed := migrateProviderConfig(config.Provider); changed {
 			config.Provider = nextProvider

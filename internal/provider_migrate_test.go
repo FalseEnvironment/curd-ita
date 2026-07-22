@@ -114,11 +114,10 @@ func TestMigrateOnVersionUpgradeWritesVersionAndUpdatesProvider(t *testing.T) {
 	}
 }
 
-func TestLoadConfigAppendsMissingOptionsIncludingVimKeys(t *testing.T) {
+func TestLoadConfigDoesNotDumpAllDefaultsIntoSparseFile(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "curd.conf")
 	storagePath := filepath.Join(tempDir, "share")
-	// Minimal config: no VimKeys — must be appended on load (not a full rewrite).
 	initial := "StoragePath=" + storagePath + "\n" +
 		"AddMissingOptions=true\n" +
 		"Provider=stacked\n" +
@@ -131,8 +130,9 @@ func TestLoadConfigAppendsMissingOptionsIncludingVimKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
+	// In-memory defaults still apply.
 	if config.VimKeys {
-		t.Fatal("VimKeys default should be false")
+		t.Fatal("VimKeys default should be false in memory")
 	}
 
 	after, err := os.ReadFile(configPath)
@@ -140,32 +140,19 @@ func TestLoadConfigAppendsMissingOptionsIncludingVimKeys(t *testing.T) {
 		t.Fatalf("read config: %v", err)
 	}
 	text := string(after)
-	if !strings.Contains(text, "VimKeys=false") {
-		t.Fatalf("expected VimKeys=false in config file:\n%s", text)
+	// Sparse file must not gain every historical default on a normal load.
+	if strings.Contains(text, "VimKeys=") {
+		t.Fatalf("LoadConfig must not append versioned options without an upgrade:\n%s", text)
 	}
-	// Original lines preserved (append-only).
-	if !strings.Contains(text, "Player=mpv") || !strings.Contains(text, "StoragePath="+storagePath) {
-		t.Fatalf("original keys should remain:\n%s", text)
-	}
-
-	// Second load must not duplicate VimKeys.
-	if _, err := LoadConfig(configPath); err != nil {
-		t.Fatalf("second LoadConfig: %v", err)
-	}
-	after2, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("read config again: %v", err)
-	}
-	if strings.Count(string(after2), "VimKeys=") != 1 {
-		t.Fatalf("VimKeys should appear once, got:\n%s", after2)
+	if strings.Contains(text, "SkipOp=") {
+		t.Fatalf("LoadConfig must not dump baseline defaults into sparse configs:\n%s", text)
 	}
 }
 
-func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
+func TestMigrateOnVersionUpgradeInjectsOnlyOptionsForCrossedVersions(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "curd.conf")
 	storagePath := filepath.Join(tempDir, "share")
-	// Full-enough config written first so LoadConfig isn't under test here.
 	initial := "StoragePath=" + storagePath + "\n" +
 		"AddMissingOptions=true\n" +
 		"Provider=stacked\n" +
@@ -173,11 +160,10 @@ func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	// Pretend we're already on an older stored version with a sparse file.
 	if err := os.MkdirAll(storagePath, 0755); err != nil {
 		t.Fatalf("mkdir storage: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(storagePath, "curd_version"), []byte("2.0.0\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(storagePath, "curd_version"), []byte("2.0.2\n"), 0644); err != nil {
 		t.Fatalf("write version: %v", err)
 	}
 
@@ -188,17 +174,12 @@ func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
 		"Player":            "mpv",
 	})
 
-	// Wipe keys that LoadConfig would have added so migration is the injector.
-	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
-		t.Fatalf("rewrite sparse config: %v", err)
-	}
-
 	updated, err := MigrateOnVersionUpgrade(configPath, &config, "2.0.3")
 	if err != nil {
 		t.Fatalf("MigrateOnVersionUpgrade: %v", err)
 	}
 	if !updated {
-		t.Fatal("expected config file to gain new options on version upgrade")
+		t.Fatal("expected config file to gain 2.0.3 options on upgrade")
 	}
 
 	after, err := os.ReadFile(configPath)
@@ -207,10 +188,16 @@ func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
 	}
 	text := string(after)
 	if !strings.Contains(text, "VimKeys=false") {
-		t.Fatalf("expected VimKeys=false appended on upgrade:\n%s", text)
+		t.Fatalf("expected VimKeys=false for 2.0.3 upgrade:\n%s", text)
+	}
+	if !strings.Contains(text, "MpvPlaybackStartTimeout=20") {
+		t.Fatalf("expected MpvPlaybackStartTimeout for 2.0.3 upgrade:\n%s", text)
+	}
+	// Must NOT dump unrelated baseline keys.
+	if strings.Contains(text, "SkipOp=") || strings.Contains(text, "DiscordPresence=") {
+		t.Fatalf("upgrade must not inject unregistered baseline options:\n%s", text)
 	}
 
-	// Same version: no further rewrite.
 	updated, err = MigrateOnVersionUpgrade(configPath, &config, "2.0.3")
 	if err != nil {
 		t.Fatalf("second migrate: %v", err)
@@ -220,17 +207,41 @@ func TestMigrateOnVersionUpgradeInjectsMissingOptionsOnce(t *testing.T) {
 	}
 }
 
-func TestInjectMissingConfigDefaultsIdempotent(t *testing.T) {
+func TestInjectConfigOptionsSinceOnlyCrossedVersions(t *testing.T) {
 	m := map[string]string{"Player": "mpv"}
-	added := injectMissingConfigDefaults(m)
-	if len(added) == 0 {
-		t.Fatal("expected missing keys to be injected")
+	// Already on 2.0.3 — nothing new.
+	if added := injectConfigOptionsSince(m, "2.0.3", "2.0.3"); len(added) != 0 {
+		t.Fatalf("same version should inject nothing, got %v", added)
 	}
-	if _, ok := m["VimKeys"]; !ok {
-		t.Fatal("expected VimKeys default")
+	// 2.0.2 → 2.0.3 gets VimKeys + timeout only.
+	added := injectConfigOptionsSince(m, "2.0.2", "2.0.3")
+	if len(added) != 2 {
+		t.Fatalf("expected 2 options for 2.0.2→2.0.3, got %v", added)
 	}
-	if second := injectMissingConfigDefaults(m); len(second) != 0 {
+	want := map[string]bool{"VimKeys": true, "MpvPlaybackStartTimeout": true}
+	for _, key := range added {
+		if !want[key] {
+			t.Fatalf("unexpected injected key %q in %v", key, added)
+		}
+	}
+	// Already present keys are skipped.
+	if second := injectConfigOptionsSince(m, "2.0.2", "2.0.3"); len(second) != 0 {
 		t.Fatalf("second inject should be empty, got %v", second)
+	}
+}
+
+func TestCompareVersionsOrdering(t *testing.T) {
+	if !versionLess("2.0.2", "2.0.3") {
+		t.Fatal("2.0.2 should be < 2.0.3")
+	}
+	if !versionLess("", "2.0.3") {
+		t.Fatal("empty stored version should be older than a release")
+	}
+	if versionLess("2.0.3", "2.0.3") {
+		t.Fatal("equal versions should not be less")
+	}
+	if !versionLessOrEqual("2.0.3", "2.0.3") {
+		t.Fatal("equal versions should be <= ")
 	}
 }
 
