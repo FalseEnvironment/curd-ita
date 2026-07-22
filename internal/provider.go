@@ -721,14 +721,67 @@ func filterExcludedProviders(providerNames []string, exclude []string) []string 
 	return filtered
 }
 
-// ResolveEpisodeURLExcludingProviders tries configured providers in order, skipping any in exclude.
+// ResolveEpisodeURLExcludingProviders tries preferred SubOrDub across providers, skipping exclude.
 func ResolveEpisodeURLExcludingProviders(config CurdConfig, anime *Anime, epNo int, exclude []string) (ProviderEpisodeResult, error) {
-	mode := normalizeTranslationType(config.SubOrDub)
+	return resolveEpisodeURLExcludingProvidersMode(config, anime, epNo, exclude, normalizeTranslationType(config.SubOrDub))
+}
+
+// ResolveEpisodeURLExcludingProvidersMode tries an explicit sub/dub mode across providers, skipping exclude.
+func ResolveEpisodeURLExcludingProvidersMode(config CurdConfig, anime *Anime, epNo int, exclude []string, mode string) (ProviderEpisodeResult, error) {
+	return resolveEpisodeURLExcludingProvidersMode(config, anime, epNo, exclude, mode)
+}
+
+func resolveEpisodeURLExcludingProvidersMode(config CurdConfig, anime *Anime, epNo int, exclude []string, mode string) (ProviderEpisodeResult, error) {
+	mode = normalizeTranslationType(mode)
 	providerNames := filterExcludedProviders(providerNamesForAnime(&config, anime), exclude)
 	if len(providerNames) == 0 {
 		return ProviderEpisodeResult{}, fmt.Errorf("no providers left to try")
 	}
 	return episodeModeResultWithProviders(config, anime, epNo, mode, providerNames)
+}
+
+// ResolveEpisodeURLAlternateModeWithPrompt probes the non-preferred sub/dub mode and asks
+// before switching. Preferred mode is never switched silently.
+func ResolveEpisodeURLAlternateModeWithPrompt(config CurdConfig, anime *Anime, epNo int, exclude []string) (ProviderEpisodeResult, error) {
+	preferredMode := normalizeTranslationType(config.SubOrDub)
+	fallbackMode := alternateTranslationType(preferredMode)
+
+	providerNames := filterExcludedProviders(providerNamesForAnime(&config, anime), exclude)
+	if len(providerNames) == 0 {
+		return ProviderEpisodeResult{}, fmt.Errorf("no providers left to try for %s", fallbackMode)
+	}
+
+	// Probe on a copy so rejecting the prompt does not mutate the live anime mapping.
+	probeAnime := anime
+	if anime != nil {
+		animeCopy := *anime
+		probeAnime = &animeCopy
+	}
+	fallbackResult, fallbackErr := episodeModeResultWithProviders(config, probeAnime, epNo, fallbackMode, providerNames)
+	if fallbackErr != nil || len(fallbackResult.Links) == 0 {
+		if fallbackErr != nil {
+			return ProviderEpisodeResult{}, fallbackErr
+		}
+		return ProviderEpisodeResult{}, fmt.Errorf("no %s streams available", fallbackMode)
+	}
+
+	CurdOut(audioFallbackPrompt(preferredMode, fallbackMode))
+	selected, selectErr := promptSelect([]SelectionOption{
+		{Key: "play", Label: "Play " + fallbackMode},
+		{Key: "cancel", Label: "Cancel"},
+	})
+	if selectErr != nil {
+		return ProviderEpisodeResult{}, selectErr
+	}
+	if selected.Key != "play" {
+		return ProviderEpisodeResult{}, fmt.Errorf("%s unavailable and %s fallback declined", preferredMode, fallbackMode)
+	}
+
+	if anime != nil {
+		anime.ProviderName = fallbackResult.ProviderName
+		anime.ProviderId = fallbackResult.ProviderID
+	}
+	return fallbackResult, nil
 }
 
 func ResolveEpisodeURL(config CurdConfig, anime *Anime, epNo int) (ProviderEpisodeResult, error) {
@@ -737,6 +790,8 @@ func ResolveEpisodeURL(config CurdConfig, anime *Anime, epNo int) (ProviderEpiso
 
 func ResolveEpisodeURLForPlayback(config CurdConfig, anime *Anime, epNo int) (ProviderEpisodeResult, error) {
 	preferredMode := normalizeTranslationType(config.SubOrDub)
+
+	// 1) Exhaust preferred sub/dub across the full provider stack before any mode switch.
 	result, err := episodeModeResult(config, anime, epNo, preferredMode)
 	if err == nil && len(result.Links) > 0 {
 		return result, nil
@@ -745,6 +800,8 @@ func ResolveEpisodeURLForPlayback(config CurdConfig, anime *Anime, epNo int) (Pr
 	preferredErr := err
 	runtimeConfig := configForProviderUpdate(config)
 	providerNames := configuredProviderNames(runtimeConfig)
+
+	// 2) Optional Animepahe still uses preferred mode only.
 	if shouldOfferAnimepaheFallback(runtimeConfig, providerNames) {
 		useAnimepahe, declinedAnimepahe, promptErr := promptAnimepaheEpisodeFallbackConsent(preferredMode, epNo)
 		if promptErr != nil {
@@ -772,13 +829,8 @@ func ResolveEpisodeURLForPlayback(config CurdConfig, anime *Anime, epNo int) (Pr
 		}
 	}
 
-	fallbackMode := alternateTranslationType(preferredMode)
-	fallbackAnime := anime
-	if anime != nil {
-		animeCopy := *anime
-		fallbackAnime = &animeCopy
-	}
-	fallbackResult, fallbackErr := episodeModeResult(config, fallbackAnime, epNo, fallbackMode)
+	// 3) Only after preferred is exhausted, probe alternate mode and always ask the user.
+	fallbackResult, fallbackErr := ResolveEpisodeURLAlternateModeWithPrompt(config, anime, epNo, nil)
 	if fallbackErr != nil || len(fallbackResult.Links) == 0 {
 		if preferredErr != nil {
 			return ProviderEpisodeResult{}, preferredErr
@@ -787,26 +839,6 @@ func ResolveEpisodeURLForPlayback(config CurdConfig, anime *Anime, epNo int) (Pr
 			return ProviderEpisodeResult{}, fallbackErr
 		}
 		return ProviderEpisodeResult{}, nil
-	}
-
-	CurdOut(audioFallbackPrompt(preferredMode, fallbackMode))
-	selected, selectErr := promptSelect([]SelectionOption{
-		{Key: "play", Label: "Play " + fallbackMode},
-		{Key: "cancel", Label: "Cancel"},
-	})
-	if selectErr != nil {
-		return ProviderEpisodeResult{}, selectErr
-	}
-	if selected.Key != "play" {
-		if preferredErr != nil {
-			return ProviderEpisodeResult{}, preferredErr
-		}
-		return ProviderEpisodeResult{}, nil
-	}
-
-	if anime != nil {
-		anime.ProviderName = fallbackResult.ProviderName
-		anime.ProviderId = fallbackResult.ProviderID
 	}
 	return fallbackResult, nil
 }

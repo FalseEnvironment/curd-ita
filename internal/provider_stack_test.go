@@ -381,6 +381,76 @@ func TestResolveEpisodeURLExcludingProviders(t *testing.T) {
 	}
 }
 
+func TestResolveEpisodeURLExcludingProvidersModeUsesExplicitMode(t *testing.T) {
+	allanime := &stackStubProvider{
+		name: "allanime",
+		episodeResults: map[string]map[string][]string{
+			"allanime-id": {"dub": {"allanime-dub"}, "sub": {"allanime-sub"}},
+		},
+		searchResults: map[string][]SelectionOption{
+			"dub": {{Title: "Example", Key: "allanime-id"}},
+			"sub": {{Title: "Example", Key: "allanime-id"}},
+		},
+	}
+	withProviderFactories(t, allanime)
+
+	cfg := CurdConfig{Provider: `["allanime"]`, SubOrDub: "sub"}
+	anime := &Anime{
+		Title:        AnimeTitle{Romaji: "Example"},
+		ProviderName: "allanime",
+		ProviderId:   "allanime-id",
+	}
+
+	result, err := ResolveEpisodeURLExcludingProvidersMode(cfg, anime, 1, nil, "dub")
+	if err != nil {
+		t.Fatalf("ResolveEpisodeURLExcludingProvidersMode returned error: %v", err)
+	}
+	if result.Mode != "dub" || result.Links[0] != "allanime-dub" {
+		t.Fatalf("expected explicit dub mode, got %#v", result)
+	}
+}
+
+func TestResolveEpisodeURLAlternateModeWithPromptRequiresApproval(t *testing.T) {
+	allanime := &stackStubProvider{
+		name: "allanime",
+		episodeResults: map[string]map[string][]string{
+			"allanime-id": {"dub": {"allanime-dub"}},
+		},
+		searchResults: map[string][]SelectionOption{
+			"dub": {{Title: "Example", Key: "allanime-id"}},
+		},
+	}
+	withProviderFactories(t, allanime)
+
+	cfg := CurdConfig{Provider: `["allanime"]`, SubOrDub: "sub"}
+	anime := &Anime{
+		Title:        AnimeTitle{Romaji: "Example"},
+		ProviderName: "allanime",
+		ProviderId:   "allanime-id",
+	}
+
+	withPromptSelect(t, func(options []SelectionOption) (SelectionOption, error) {
+		return SelectionOption{Key: "cancel"}, nil
+	})
+	if _, err := ResolveEpisodeURLAlternateModeWithPrompt(cfg, anime, 1, nil); err == nil {
+		t.Fatal("expected declined alternate mode to error")
+	}
+	if anime.ProviderId != "allanime-id" {
+		t.Fatalf("declined prompt should not change provider mapping, got %q", anime.ProviderId)
+	}
+
+	withPromptSelect(t, func(options []SelectionOption) (SelectionOption, error) {
+		return SelectionOption{Key: "play"}, nil
+	})
+	result, err := ResolveEpisodeURLAlternateModeWithPrompt(cfg, anime, 1, nil)
+	if err != nil {
+		t.Fatalf("accepted alternate mode returned error: %v", err)
+	}
+	if result.Mode != "dub" || result.Links[0] != "allanime-dub" {
+		t.Fatalf("expected dub fallback, got %#v", result)
+	}
+}
+
 func TestResolveEpisodeURLForPlaybackTriesAllPreferredProvidersBeforeAudioFallback(t *testing.T) {
 	allanime := &stackStubProvider{
 		name: "allanime",
