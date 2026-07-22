@@ -17,7 +17,7 @@ var version string // Will be set by ldflags during build
 
 func resolvedVersion() string {
 	if version == "" {
-		return "2.0.3"
+		return "2.0.4"
 	}
 
 	return version
@@ -78,6 +78,7 @@ func main() {
 	flag.BoolVar(&userCurdConfig.DiscordPresence, "discord-presence", userCurdConfig.DiscordPresence, "Enable Discord presence (true/false)")
 	flag.StringVar(&userCurdConfig.DiscordClientId, "discord-client-id", userCurdConfig.DiscordClientId, "Discord client ID for Rich Presence")
 	flag.BoolVar(&userCurdConfig.VimKeys, "vim-keys", userCurdConfig.VimKeys, "Enable vim motions in selection menus (j/k/h/l, / search) (true/false)")
+	flag.BoolVar(&userCurdConfig.CheckUpdates, "check-updates", userCurdConfig.CheckUpdates, "Check for curd updates in the background when idle (true/false)")
 	continueLast := flag.Bool("c", false, "Continue last episode")
 	addNewAnime := flag.Bool("new", false, "Add new anime")
 	rofiSelection := flag.Bool("rofi", false, "Open selection in rofi")
@@ -199,6 +200,14 @@ func main() {
 	} else if *hardSubFlag {
 		userCurdConfig.SubStyle = "hard"
 	}
+
+	// Show update found by a previous idle check (no network on the hot path).
+	if internal.HandlePendingUpdatePrompt(&userCurdConfig, resolvedVersion()) {
+		return
+	}
+
+	// Idle background check — does not block startup; stores result for next launch.
+	internal.StartBackgroundUpdateCheck(&userCurdConfig, resolvedVersion())
 
 	// Get the token from the token file for the configured remote tracker.
 	if internal.UsesRemoteTracking(&userCurdConfig) {

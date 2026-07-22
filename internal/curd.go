@@ -430,46 +430,35 @@ func UpdateCurd(repo, fileName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to find current executable: %v", err)
 	}
-
-	// Determine the correct binary name based on OS and architecture
-	var binaryName string
-	switch runtime.GOOS {
-	case "windows":
-		if runtime.GOARCH == "arm64" {
-			binaryName = "curd-windows-arm64.exe"
-		} else {
-			binaryName = "curd-windows-x86_64.exe"
-		}
-	case "darwin": // macOS
-		switch runtime.GOARCH {
-		case "amd64":
-			binaryName = "curd-macos-x86_64"
-		case "arm64":
-			binaryName = "curd-macos-arm64"
-		default:
-			binaryName = "curd-macos-universal"
-		}
-	case "linux":
-		switch runtime.GOARCH {
-		case "amd64":
-			binaryName = "curd-linux-x86_64"
-		case "arm64":
-			binaryName = "curd-linux-arm64"
-		default:
-			return fmt.Errorf("unsupported Linux architecture: %s", runtime.GOARCH)
-		}
-	default:
-		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	// Resolve symlinks so we replace the real binary (e.g. /usr/local/bin/curd).
+	if resolved, resolveErr := filepath.EvalSymlinks(executablePath); resolveErr == nil && resolved != "" {
+		executablePath = resolved
 	}
 
+	binaryName, err := curdReleaseBinaryName()
+	if err != nil {
+		return err
+	}
+	_ = fileName // retained for call-site compatibility
+
+	if strings.TrimSpace(repo) == "" {
+		repo = defaultUpdateRepo
+	}
 	// GitHub release URL for curd
 	url := fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", repo, binaryName)
 
-	// Temporary path for the downloaded curd executable
+	// Temporary path for the downloaded curd executable (prefer same dir when writable)
 	tmpPath := executablePath + ".tmp"
+	if tmpDir := os.TempDir(); tmpDir != "" {
+		tmpPath = filepath.Join(tmpDir, "curd-update-"+binaryName)
+	}
 
 	// Download the curd executable
-	resp, err := sharedHTTPClient.Get(url)
+	client := sharedHTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Minute}
+	}
+	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %v", err)
 	}
@@ -485,43 +474,28 @@ func UpdateCurd(repo, fileName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create temporary file: %v", err)
 	}
-	defer out.Close()
-
-	// Set file permissions
-	if err := out.Chmod(0755); err != nil {
-		return fmt.Errorf("failed to set file permissions: %v", err)
-	}
 
 	// Copy the downloaded content to the temporary file
 	if _, err := io.Copy(out, resp.Body); err != nil {
+		out.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to write to temporary file: %v", err)
 	}
-
-	// Close the file before renaming
-	out.Close()
-
-	// Replace the old executable with the new one
-	if runtime.GOOS == "windows" {
-		// On Windows, we need to rename the old file first
-		oldPath := executablePath + ".old"
-		err = os.Rename(executablePath, oldPath)
-		if err != nil {
-			return fmt.Errorf("failed to rename old executable: %v", err)
-		}
-		err = os.Rename(tmpPath, executablePath)
-		if err != nil {
-			// Try to restore the old executable if the rename fails
-			os.Rename(oldPath, executablePath)
-			return fmt.Errorf("failed to rename new executable: %v", err)
-		}
-		os.Remove(oldPath)
-	} else {
-		// On Unix systems, we can directly rename
-		if err := os.Rename(tmpPath, executablePath); err != nil {
-			return fmt.Errorf("failed to replace executable: %v", err)
-		}
+	if err := out.Chmod(0755); err != nil {
+		out.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to set file permissions: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to close temporary file: %v", err)
 	}
 
+	// Replace the old executable (prompts for sudo if the install path is not writable).
+	if err := replaceExecutable(tmpPath, executablePath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
 	return nil
 }
 

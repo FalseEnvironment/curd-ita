@@ -1,6 +1,6 @@
 [Setup]
 AppName=Curd Installer
-AppVersion=2.0.3
+AppVersion=2.0.4
 DefaultDirName={userappdata}\Curd
 PrivilegesRequired=lowest
 AllowNoIcons=yes

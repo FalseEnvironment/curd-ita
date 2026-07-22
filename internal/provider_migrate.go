@@ -120,6 +120,8 @@ func configOptionsIntroducedInVersion() map[string]string {
 		// 2.0.3 — playback fallback timeout + vim selection motions
 		"MpvPlaybackStartTimeout": "2.0.3",
 		"VimKeys":                 "2.0.3",
+		// 2.0.4 — idle background update checks
+		"CheckUpdates": "2.0.4",
 	}
 }
 
