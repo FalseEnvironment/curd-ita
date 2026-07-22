@@ -691,7 +691,8 @@ func rofiSelectInternal(options []SelectionOption, isHomeMenu bool, refreshConfi
 	for {
 		optionsString := buildRofiOptionsString(currentOptions, isHomeMenu)
 		configPath := filepath.Join(GetStoragePath(), "selectanime.rasi")
-		args := []string{"-dmenu", "-theme", configPath, "-i", "-p", prompt}
+		// -markup: enable Pango in -mesg (and prompts where supported)
+		args := []string{"-dmenu", "-theme", configPath, "-i", "-markup", "-p", prompt}
 		if msg := strings.TrimSpace(message); msg != "" {
 			args = append(args, "-mesg", msg)
 		}

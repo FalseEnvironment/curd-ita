@@ -213,12 +213,35 @@ func TestBuildUpdatePromptMessage(t *testing.T) {
 		LatestVersion: "2.0.2",
 		ReleaseName:   "Curd v2.0.2",
 		HTMLURL:       "https://example.com",
-		ReleaseNotes:  "fixed stuff",
+		ReleaseNotes:  "## Direct Commits\n- **fixed** stuff",
 	})
 	if !strings.Contains(prompt, "2.0.1") || !strings.Contains(prompt, "2.0.2") {
 		t.Fatalf("prompt=%q", prompt)
 	}
-	if !strings.Contains(msg, "fixed stuff") || !strings.Contains(msg, "https://example.com") {
+	if !strings.Contains(msg, "fixed") || !strings.Contains(msg, "https://example.com") {
 		t.Fatalf("message=%q", msg)
+	}
+}
+
+func TestMarkdownToPangoColorsHeadingsAndBullets(t *testing.T) {
+	md := "## Direct Commits\n- fix: something\n**Full Changelog**: https://example.com/compare"
+	got := markdownToPango(md)
+	if !strings.Contains(got, "foreground=") {
+		t.Fatalf("expected pango colors, got %q", got)
+	}
+	if !strings.Contains(got, "Direct Commits") || !strings.Contains(got, "•") {
+		t.Fatalf("expected heading/bullet conversion, got %q", got)
+	}
+}
+
+func TestUpdateActionOptionsOrder(t *testing.T) {
+	opts := updateActionOptions()
+	if len(opts) < 1 || opts[0].Key != "update" {
+		t.Fatalf("Update now must be first, got %#v", opts)
+	}
+	for _, o := range opts {
+		if strings.HasPrefix(o.Label, "1.") || strings.Contains(o.Label, "1. ") {
+			t.Fatalf("labels should not be numbered: %q", o.Label)
+		}
 	}
 }

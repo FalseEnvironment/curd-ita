@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 )
 
@@ -272,31 +274,197 @@ func formatLocalTime(t time.Time) string {
 	return t.In(time.Local).Format("Mon Jan 2 2006, 3:04 PM MST")
 }
 
+func escapePango(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+var (
+	mdBoldRe  = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	mdCodeRe  = regexp.MustCompile("`([^`]+)`")
+	mdLinkRe  = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+	mdURLRe   = regexp.MustCompile(`https?://[^\s<>\]]+`)
+	ansiStrip = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+)
+
+// markdownToPango turns common GitHub release markdown into Rofi-friendly Pango.
+func markdownToPango(md string) string {
+	lines := strings.Split(strings.ReplaceAll(md, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "":
+			out = append(out, "")
+			continue
+		case strings.HasPrefix(trimmed, "### "):
+			text := escapePango(strings.TrimPrefix(trimmed, "### "))
+			out = append(out, `<span foreground="#FFD166"><b>`+text+`</b></span>`)
+		case strings.HasPrefix(trimmed, "## "):
+			text := escapePango(strings.TrimPrefix(trimmed, "## "))
+			out = append(out, `<span foreground="#7CB9E8" size="large"><b>`+text+`</b></span>`)
+		case strings.HasPrefix(trimmed, "# "):
+			text := escapePango(strings.TrimPrefix(trimmed, "# "))
+			out = append(out, `<span foreground="#7CFC98" size="large"><b>`+text+`</b></span>`)
+		case strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* "):
+			body := strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "* ")
+			out = append(out, `<span foreground="#98FB98">•</span> `+inlineMarkdownToPango(body))
+		case strings.HasPrefix(trimmed, "**Full Changelog**") || strings.HasPrefix(strings.ToLower(trimmed), "**full changelog**"):
+			out = append(out, `<span foreground="#B0B0B0">`+inlineMarkdownToPango(trimmed)+`</span>`)
+		default:
+			out = append(out, inlineMarkdownToPango(trimmed))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func inlineMarkdownToPango(s string) string {
+	// Links first (before escaping full string piece by piece)
+	s = mdLinkRe.ReplaceAllStringFunc(s, func(m string) string {
+		parts := mdLinkRe.FindStringSubmatch(m)
+		if len(parts) != 3 {
+			return escapePango(m)
+		}
+		return `<span foreground="#6EC6FF" underline="single">` + escapePango(parts[1]) + `</span>`
+	})
+	// Escape remaining raw text while preserving spans we inserted — do a simple pass:
+	// split on existing span tags is hard; re-process from original for bold/code on non-link text.
+	// Safer path: escape whole line then re-apply patterns on escaped text where ** still present.
+	if !strings.Contains(s, "<span") {
+		s = escapePango(s)
+		s = mdBoldRe.ReplaceAllString(s, `<span foreground="#FFFFFF"><b>$1</b></span>`)
+		s = mdCodeRe.ReplaceAllString(s, `<span foreground="#E0B0FF" face="monospace">$1</span>`)
+		s = mdURLRe.ReplaceAllStringFunc(s, func(u string) string {
+			return `<span foreground="#6EC6FF" underline="single">` + u + `</span>`
+		})
+		return s
+	}
+	// Already has link spans — only lightly touch remaining ** if any outside tags
+	s = mdBoldRe.ReplaceAllString(s, `<b>$1</b>`)
+	return s
+}
+
+// markdownToTerminal colors release notes for CLI (lipgloss), easy on the eyes.
+func markdownToTerminal(md string) string {
+	heading := lipgloss.NewStyle().Foreground(lipgloss.Color("#7CB9E8")).Bold(true)
+	subhead := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD166")).Bold(true)
+	bullet := lipgloss.NewStyle().Foreground(lipgloss.Color("#98FB98"))
+	body := lipgloss.NewStyle().Foreground(lipgloss.Color("#E6E6FA"))
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#9A9A9A"))
+	link := lipgloss.NewStyle().Foreground(lipgloss.Color("#6EC6FF")).Underline(true)
+
+	lines := strings.Split(strings.ReplaceAll(md, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "":
+			out = append(out, "")
+		case strings.HasPrefix(trimmed, "### "):
+			out = append(out, subhead.Render(strings.TrimPrefix(trimmed, "### ")))
+		case strings.HasPrefix(trimmed, "## "):
+			out = append(out, heading.Render(strings.TrimPrefix(trimmed, "## ")))
+		case strings.HasPrefix(trimmed, "# "):
+			out = append(out, heading.Render(strings.TrimPrefix(trimmed, "# ")))
+		case strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* "):
+			item := strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "* ")
+			item = mdBoldRe.ReplaceAllString(item, "$1")
+			item = mdLinkRe.ReplaceAllString(item, "$1")
+			out = append(out, bullet.Render("• ")+body.Render(item))
+		case strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://"):
+			out = append(out, link.Render(trimmed))
+		case strings.Contains(strings.ToLower(trimmed), "full changelog"):
+			out = append(out, muted.Render(mdLinkRe.ReplaceAllString(trimmed, "$1 ($2)")))
+		default:
+			t := mdBoldRe.ReplaceAllString(trimmed, "$1")
+			t = mdLinkRe.ReplaceAllString(t, "$1")
+			out = append(out, body.Render(t))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 func buildUpdatePromptMessage(currentVersion string, state updatePendingState) (prompt, message string) {
+	return buildUpdatePromptMessageMode(currentVersion, state, false)
+}
+
+// buildUpdatePromptMessageMode formats the update banner.
+// forRofi=true emits Pango markup for Rofi -mesg; false emits lipgloss ANSI for the terminal.
+func buildUpdatePromptMessageMode(currentVersion string, state updatePendingState, forRofi bool) (prompt, message string) {
 	from := normalizeReleaseVersion(currentVersion)
 	to := normalizeReleaseVersion(state.LatestVersion)
-	prompt = fmt.Sprintf("Update %s → %s", from, to)
+	prompt = fmt.Sprintf("✨ Update %s → %s", from, to)
 
-	var b strings.Builder
-	if state.ReleaseName != "" {
-		fmt.Fprintf(&b, "%s\n", state.ReleaseName)
-	}
-	fmt.Fprintf(&b, "Current: %s   Latest: %s\n", from, to)
-	if state.HTMLURL != "" {
-		fmt.Fprintf(&b, "%s\n", state.HTMLURL)
-	}
-	b.WriteString("\n")
 	notes := strings.TrimSpace(state.ReleaseNotes)
 	if notes == "" {
 		notes = "(No release notes on GitHub for this release.)"
 	}
-	b.WriteString(notes)
+
+	if forRofi {
+		var b strings.Builder
+		title := state.ReleaseName
+		if title == "" {
+			title = "Curd " + to
+		}
+		b.WriteString(`<span foreground="#7CFC98" size="large"><b>🚀 ` + escapePango(title) + `</b></span>` + "\n")
+		b.WriteString(`<span foreground="#E6E6FA">Current </span>`)
+		b.WriteString(`<span foreground="#FF8A80"><b>` + escapePango(from) + `</b></span>`)
+		b.WriteString(`<span foreground="#E6E6FA">  →  Latest </span>`)
+		b.WriteString(`<span foreground="#7CFC98"><b>` + escapePango(to) + `</b></span>` + "\n")
+		if state.HTMLURL != "" {
+			b.WriteString(`<span foreground="#6EC6FF" underline="single">` + escapePango(state.HTMLURL) + `</span>` + "\n")
+		}
+		b.WriteString("\n")
+		b.WriteString(markdownToPango(notes))
+		message = strings.TrimSpace(b.String())
+		// Pango is verbose; soft-cap markup length.
+		if len([]rune(message)) > maxReleaseNotesRunes*3 {
+			r := []rune(message)
+			message = string(r[:maxReleaseNotesRunes*3]) + "\n<span foreground=\"#9A9A9A\">… (truncated — full notes on GitHub)</span>"
+		}
+		return prompt, message
+	}
+
+	// CLI / terminal
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("#7CFC98")).Bold(true)
+	label := lipgloss.NewStyle().Foreground(lipgloss.Color("#E6E6FA"))
+	oldV := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF8A80")).Bold(true)
+	newV := lipgloss.NewStyle().Foreground(lipgloss.Color("#7CFC98")).Bold(true)
+	link := lipgloss.NewStyle().Foreground(lipgloss.Color("#6EC6FF")).Underline(true)
+
+	var b strings.Builder
+	name := state.ReleaseName
+	if name == "" {
+		name = "Curd " + to
+	}
+	b.WriteString(title.Render("🚀 "+name) + "\n")
+	b.WriteString(label.Render("Current ") + oldV.Render(from) + label.Render("  →  Latest ") + newV.Render(to) + "\n")
+	if state.HTMLURL != "" {
+		b.WriteString(link.Render(state.HTMLURL) + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(markdownToTerminal(notes))
 	message = strings.TrimSpace(b.String())
-	// Rofi -mesg stays readable; keep a hard cap.
-	if runes := []rune(message); len(runes) > maxReleaseNotesRunes {
-		message = string(runes[:maxReleaseNotesRunes]) + "\n… (truncated — full notes on GitHub)"
+	// Cap plain-ish length for terminal
+	plain := ansiStrip.ReplaceAllString(message, "")
+	if len([]rune(plain)) > maxReleaseNotesRunes {
+		// Keep header + truncated notes roughly
+		message = message + "\n" + label.Render("… (truncated — full notes on GitHub)")
 	}
 	return prompt, message
+}
+
+func updateActionOptions() []SelectionOption {
+	// Emoji prefixes: lively, ordered, no numeric indices; preserveOrder keeps this order.
+	return []SelectionOption{
+		{Key: "update", Label: "🚀  Update now"},
+		{Key: "later", Label: "⏰  Remind me later"},
+		{Key: "skip", Label: "⏭️  Skip this version"},
+		{Key: "disable", Label: "🔕  Turn off automatic update checks"},
+		{Key: "continue", Label: "▶️  Continue without updating"},
+	}
 }
 
 // refreshUpdateStateFromGitHub reloads tag/name/body/url from the live release API
@@ -371,24 +539,18 @@ func HandlePendingUpdatePrompt(config *CurdConfig, currentVersion string) bool {
 	}
 	_ = saveUpdatePendingState(config.StoragePath, state)
 
-	// Fixed order (Update now first). No index prefixes — Rofi keeps order;
-	// CLI uses DynamicSelectPreserveOrder so labels aren't alpha-sorted.
-	options := []SelectionOption{
-		{Key: "update", Label: "Update now"},
-		{Key: "later", Label: "Remind me later"},
-		{Key: "skip", Label: "Skip this version"},
-		{Key: "disable", Label: "Turn off automatic update checks"},
-		{Key: "continue", Label: "Continue without updating"},
-	}
-	prompt, message := buildUpdatePromptMessage(currentVersion, state)
+	// Fixed order (Update now first). Emoji labels; preserveOrder for CLI.
+	options := updateActionOptions()
+	prompt, message := buildUpdatePromptMessageMode(currentVersion, state, config.RofiSelection)
 
 	var selected SelectionOption
 	var err error
 	if config.RofiSelection {
-		// All details go in Rofi -mesg; zero notify-send spam for notes.
+		// Pango-colored notes in -mesg; one Rofi UI, no notify spam.
 		selected, err = RofiSelectWithMessage(options, false, prompt, message)
 	} else {
-		fmt.Println(prompt)
+		header := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD166")).Bold(true)
+		fmt.Println(header.Render(prompt))
 		fmt.Println(message)
 		fmt.Println()
 		selected, err = DynamicSelectPreserveOrder(options)
