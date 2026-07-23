@@ -545,19 +545,25 @@ func WatchUntracked(userCurdConfig *CurdConfig) {
 
 				if anime.Ep.Started {
 					percentageWatched := PercentageWatched(anime.Ep.Player.PlaybackTime, anime.Ep.Duration)
-					Log(fmt.Sprint(percentageWatched))
-					Log(fmt.Sprint(anime.Ep.Player.PlaybackTime))
-					Log(fmt.Sprint(anime.Ep.Duration))
-					Log(fmt.Sprint(userCurdConfig.PercentageToMarkComplete))
-					if int(percentageWatched) >= userCurdConfig.PercentageToMarkComplete {
+					action := ClassifyPlaybackLoss(
+						anime.Ep.Player.SocketPath,
+						anime.Ep.Started,
+						percentageWatched,
+						userCurdConfig.PercentageToMarkComplete,
+					)
+					Log(fmt.Sprintf("untracked playback loss: pct=%.1f action=%d", percentageWatched, action))
+					switch action {
+					case PlaybackLossWait:
+						time.Sleep(200 * time.Millisecond)
+						continue
+					case PlaybackLossComplete:
 						anime.Ep.Number++
 						anime.Ep.Started = false
 						Log("Completed episode, starting next.")
 						anime.Ep.IsCompleted = true
-						break
-					} else if fmt.Sprintf("%v", err) == "invalid character '{' after top-level value" {
-						Log("Received invalid JSON response, continuing...")
-					} else {
+						// Break the playback monitor loop (not just the switch).
+						goto nextUntrackedEpisode
+					case PlaybackLossExit:
 						Log("Episode is not completed, exiting")
 						ExitCurd(nil)
 					}
@@ -616,6 +622,7 @@ func WatchUntracked(userCurdConfig *CurdConfig) {
 			}
 			time.Sleep(1 * time.Second)
 		}
+	nextUntrackedEpisode:
 	}
 
 }

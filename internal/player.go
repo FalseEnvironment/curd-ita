@@ -1,9 +1,11 @@
 package internal
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -11,10 +13,14 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wraient/curd/internal/providers"
 )
+
+// Monotonic request id for mpv JSON IPC so we can ignore interleaved events.
+var mpvRequestID atomic.Int64
 
 var logFile = "debug.log"
 
@@ -604,6 +610,46 @@ func isMPVConnectionGoneError(err error) bool {
 	return false
 }
 
+func isMPVPropertyUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "property unavailable")
+}
+
+// PlaybackLossAction tells the monitor how to react when time-pos/has-playback fails.
+type PlaybackLossAction int
+
+const (
+	// PlaybackLossWait: transient gap (playlist switch, demuxer reload). Keep monitoring.
+	PlaybackLossWait PlaybackLossAction = iota
+	// PlaybackLossComplete: episode reached the completion threshold (or MPV quit after enough watch).
+	PlaybackLossComplete
+	// PlaybackLossExit: user quit MPV before the completion threshold.
+	PlaybackLossExit
+)
+
+// ClassifyPlaybackLoss decides what to do when the monitor loses time-pos.
+// Critical: "property unavailable" while MPV is still running is normal during
+// playlist episode switches and must NOT exit curd. Only a dead MPV process
+// (or a finished episode past the completion %) should end the session.
+func ClassifyPlaybackLoss(socketPath string, started bool, percentageWatched float64, completeThreshold int) PlaybackLossAction {
+	if !started {
+		return PlaybackLossWait
+	}
+	if MPVPlaylistIsSwitching() {
+		return PlaybackLossWait
+	}
+	if int(percentageWatched) >= completeThreshold {
+		return PlaybackLossComplete
+	}
+	// MPV still open with incomplete watch → wait (playlist jump, pause, buffer).
+	if socketPath != "" && IsMPVRunning(socketPath) {
+		return PlaybackLossWait
+	}
+	return PlaybackLossExit
+}
+
 // Helper function to join args with a space
 func joinArgs(args []string) string {
 	result := ""
@@ -628,62 +674,118 @@ func MPVSendCommand(ipcSocketPath string, command []interface{}) (interface{}, e
 			Log(fmt.Sprintf("Retrying MPV command, attempt %d/%d", attempt+1, maxRetries))
 		}
 
-		conn, err := connectToPipe(ipcSocketPath)
-		if err != nil {
-			lastErr = err
-			Log(fmt.Sprintf("Connect error (attempt %d/%d): %v", attempt+1, maxRetries, err))
-			continue // Try again
+		data, err := mpvSendCommandOnce(ipcSocketPath, command)
+		if err == nil {
+			return data, nil
 		}
-		defer conn.Close()
-
-		commandStr, err := json.Marshal(map[string]interface{}{
-			"command": command,
-		})
-		if err != nil {
-			return nil, err // Don't retry on JSON marshalling errors
+		lastErr = err
+		// property unavailable is a valid answer — don't spin retries on it
+		if isMPVPropertyUnavailableError(err) {
+			return nil, err
 		}
+		Log(fmt.Sprintf("MPV command error (attempt %d/%d): %v", attempt+1, maxRetries, err))
+	}
 
-		// Send the command
-		_, err = conn.Write(append(commandStr, '\n'))
-		if err != nil {
-			lastErr = err
-			Log(fmt.Sprintf("Write error (attempt %d/%d): %v", attempt+1, maxRetries, err))
-			continue // Try again
+	return nil, fmt.Errorf("command failed after %d attempts: %w", maxRetries, lastErr)
+}
+
+func mpvSendCommandOnce(ipcSocketPath string, command []interface{}) (interface{}, error) {
+	conn, err := connectToPipe(ipcSocketPath)
+	if err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+	defer conn.Close()
+
+	reqID := mpvRequestID.Add(1)
+	payload, err := json.Marshal(map[string]interface{}{
+		"command":    command,
+		"request_id": reqID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if deadline, ok := conn.(interface{ SetReadDeadline(time.Time) error }); ok {
+		_ = deadline.SetReadDeadline(time.Now().Add(3 * time.Second))
+	}
+	if deadline, ok := conn.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		_ = deadline.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	}
+
+	if _, err := conn.Write(append(payload, '\n')); err != nil {
+		return nil, fmt.Errorf("write: %w", err)
+	}
+
+	// Read newline-delimited JSON; skip event messages until our request_id matches.
+	reader := bufio.NewReader(conn)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if d, ok := conn.(interface{ SetReadDeadline(time.Time) error }); ok {
+			_ = d.SetReadDeadline(time.Now().Add(2 * time.Second))
 		}
-
-		// Receive the response with timeout
-		buf := make([]byte, 4096)
-		// Set read deadline for 1 second
-		if deadline, ok := conn.(interface{ SetReadDeadline(time.Time) error }); ok {
-			deadline.SetReadDeadline(time.Now().Add(1 * time.Second))
-		}
-
-		n, err := conn.Read(buf)
+		line, err := reader.ReadBytes('\n')
 		if err != nil {
-			lastErr = err
-			Log(fmt.Sprintf("Read error (attempt %d/%d): %v", attempt+1, maxRetries, err))
-			continue // Try again
+			if err == io.EOF && len(line) == 0 {
+				return nil, fmt.Errorf("read: %w", err)
+			}
+			if len(line) == 0 {
+				return nil, fmt.Errorf("read: %w", err)
+			}
+			// fall through with partial line if any
+		}
+		line = bytesTrimSpace(line)
+		if len(line) == 0 {
+			continue
 		}
 
 		var response map[string]interface{}
-		if err := json.Unmarshal(buf[:n], &response); err != nil {
-			lastErr = err
-			Log(fmt.Sprintf("JSON parse error (attempt %d/%d): %v", attempt+1, maxRetries, err))
-			continue // Try again
-		}
-
-		data, responseErr := mpvResponseData(response)
-		if responseErr != nil {
-			lastErr = responseErr
-			Log(fmt.Sprintf("MPV command error (attempt %d/%d): %v", attempt+1, maxRetries, responseErr))
+		if err := json.Unmarshal(line, &response); err != nil {
+			// Multi-object garbage — try first line only already; skip bad line
 			continue
 		}
-		return data, nil
-	}
 
-	// All retries failed
-	return nil, fmt.Errorf("command failed after %d attempts: %w", maxRetries, lastErr)
+		// Skip pure events (property-change, etc.) that have no matching request_id.
+		if rid, ok := response["request_id"]; ok {
+			if idNum, ok := asInt64(rid); !ok || idNum != reqID {
+				continue
+			}
+		} else if _, isEvent := response["event"]; isEvent {
+			continue
+		}
+
+		// Response without request_id but with error/data — accept as command reply
+		// only when it looks like a command result (has "error" field).
+		if _, hasErr := response["error"]; !hasErr {
+			if _, isEvent := response["event"]; isEvent {
+				continue
+			}
+		}
+
+		return mpvResponseData(response)
+	}
+	return nil, fmt.Errorf("timed out waiting for mpv response to request_id=%d", reqID)
 }
+
+func bytesTrimSpace(b []byte) []byte {
+	return []byte(strings.TrimSpace(string(b)))
+}
+
+func asInt64(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	default:
+		return 0, false
+	}
+}
+
 
 func mpvResponseData(response map[string]interface{}) (interface{}, error) {
 	if errorValue, exists := response["error"]; exists {
