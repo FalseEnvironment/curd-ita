@@ -268,6 +268,37 @@ func TestPromptPlaylistJumpOffersUpstreamOptions(t *testing.T) {
 	}
 }
 
+func TestResolvePlaylistLeaveDefaultNeverRegressesOnRewind(t *testing.T) {
+	// Backward jump → never touch AniList/MAL, regardless of watch percentage.
+	if action := resolvePlaylistLeaveDefault(40, 39, 11, 85); action != playlistLeaveNone {
+		t.Fatalf("backward 11%% → %s want none", action)
+	}
+	if action := resolvePlaylistLeaveDefault(40, 39, 90, 85); action != playlistLeaveNone {
+		t.Fatalf("backward 90%% → %s want none", action)
+	}
+	if action := resolvePlaylistLeaveDefault(40, 1, 0, 85); action != playlistLeaveNone {
+		t.Fatalf("backward 0%% → %s want none", action)
+	}
+}
+
+func TestResolvePlaylistLeaveDefaultNeverPrompts(t *testing.T) {
+	// Same episode (mode toggle) → none.
+	if action := resolvePlaylistLeaveDefault(40, 40, 90, 85); action != playlistLeaveNone {
+		t.Fatalf("same ep → %s want none", action)
+	}
+	// Next +1 follows standard auto-mark behavior.
+	if action := resolvePlaylistLeaveDefault(40, 41, 11, 85); action != playlistLeaveNone {
+		t.Fatalf("forward early → %s want none", action)
+	}
+	if action := resolvePlaylistLeaveDefault(40, 41, 90, 85); action != playlistLeaveMarkLeft {
+		t.Fatalf("forward nearly-done → %s want mark", action)
+	}
+	// Forward skip (>+1) → none (deferred to session end).
+	if action := resolvePlaylistLeaveDefault(40, 45, 90, 85); action != playlistLeaveNone {
+		t.Fatalf("forward skip → %s want none", action)
+	}
+}
+
 func TestPromptPlaylistJumpCancelAndPromptError(t *testing.T) {
 	prev := promptSelectOrdered
 	t.Cleanup(func() { promptSelectOrdered = prev })

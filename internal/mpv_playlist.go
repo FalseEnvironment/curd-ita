@@ -285,12 +285,11 @@ func (c *MPVPlaylistController) episodeLabel(ep int, mode string) string {
 		base += " [Filler]"
 	}
 	mode = normalizeTranslationType(mode)
-	if mode != "" && mode != c.preferredMode {
+	// Tag the row when its translation mode differs from what is currently
+	// playing, so the alternate track is always obvious (in dub, a plain sub row
+	// still shows "(SUB)"; in sub, the dub row shows "(DUB)").
+	if c.currentMode != "" && mode != c.currentMode {
 		base += " (" + strings.ToUpper(mode) + ")"
-	} else if mode == "dub" && c.preferredMode == "dub" {
-		// Preferred is dub — no extra tag on every row
-	} else if mode == "dub" {
-		base += " (DUB)"
 	}
 	if ep == c.currentPlaying && mode == c.currentMode {
 		base += "  ◀"
@@ -582,14 +581,23 @@ func (c *MPVPlaylistController) watchPlaylistSelection() {
 	// missed jumps (logs showed time-pos drop with no "pos changed").
 	Log("MPV playlist: watching path + playlist-pos for episode picks")
 	poll := 150 * time.Millisecond
-	var lastSeenPath string
+	// Sample tracking independent of the (possibly stale) cached lastPos so we
+	// never silently miss an mpv path/pos transition.
+	var samplePath string
+	var samplePos int
+	haveSample := false
+	lastHeartbeat := time.Time{}
 
 	for {
 		if c.closed() {
 			return
 		}
 		if !IsMPVRunning(c.socket) {
-			return
+			// A transient IPC blip (mpv can briefly refuse the unix socket while
+			// alive) must NOT kill the only episode-selection watcher. Retry on
+			// the next tick; true termination is signalled via the done channel.
+			time.Sleep(poll)
+			continue
 		}
 		if c.suppress.Load() || MPVPlaylistIsSwitching() {
 			time.Sleep(poll)
@@ -599,44 +607,64 @@ func (c *MPVPlaylistController) watchPlaylistSelection() {
 		path := mpvStringProperty(c.socket, "path")
 		pos, posErr := c.playlistPos()
 
-		// --- Primary: path became a placeholder for episode N ---
-		if ep, ok := parseEpisodeFromPlaceholder(path); ok {
-			// Debounce: confirm path still that placeholder briefly (scrub).
+		// Heartbeat ~once a second: captures mpv's real reported state over time
+		// even when nothing changes, so we can prove what mpv does on a click.
+		if time.Since(lastHeartbeat) >= time.Second {
+			lastHeartbeat = time.Now()
+			count, _ := c.playlistCount()
+			Log(fmt.Sprintf("MPV playlist: HB pos=%d count=%d path=%s", pos, count, truncateForLog(path, 45)))
+		}
+
+		if !haveSample || path != samplePath || (posErr == nil && pos != samplePos) {
+			samplePath = path
+			samplePos = pos
+			haveSample = true
+			if isPlaceholderPath(path) {
+				if ep, ok := parseEpisodeFromPlaceholder(path); ok {
+					Log(fmt.Sprintf("MPV playlist: SAMPLE placeholder ep=%d path=%s", ep, truncateForLog(path, 60)))
+				} else {
+					Log(fmt.Sprintf("MPV playlist: SAMPLE placeholder path=%s", truncateForLog(path, 60)))
+				}
+			} else if posErr == nil {
+				Log(fmt.Sprintf("MPV playlist: SAMPLE pos=%d path=%s", pos, truncateForLog(path, 50)))
+			}
+		}
+
+		// --- Primary: path became a placeholder (a row was picked) ---
+		// Resolve the episode from the frozen index + row title ONLY. The lavfi
+		// filename's WxH encoding is unreliable (decodes to random episodes like
+		// 192/300) and must never drive which episode we load.
+		if isPlaceholderPath(path) {
+			// Debounce: confirm the placeholder is still the active path (scrub).
 			time.Sleep(80 * time.Millisecond)
-			path2 := mpvStringProperty(c.socket, "path")
-			ep2, ok2 := parseEpisodeFromPlaceholder(path2)
-			if !ok2 {
+			if !isPlaceholderPath(mpvStringProperty(c.socket, "path")) {
 				continue
 			}
-			ep = ep2
-			path = path2
 
-			mode := c.preferredMode
-			if posErr == nil && pos >= 0 {
-				if _, title := c.playlistEntryMeta(pos); title != "" {
-					if _, m, ok3 := parsePlaylistEpisodeTitle(title, c.preferredMode); ok3 {
-						mode = m
-					}
-				}
+			targetPos := pos
+			if posErr != nil || pos < 0 {
+				targetPos, _ = c.playlistPos()
+			}
+			slot, slotErr := c.resolveSlotAt(targetPos)
+			if slotErr != nil {
+				Log(fmt.Sprintf("MPV playlist: placeholder pick unresolvable at pos %d: %v", targetPos, slotErr))
+				c.lastPos = targetPos
+				continue
 			}
 
 			c.mu.Lock()
 			curEp := c.currentPlaying
 			c.mu.Unlock()
 
-			Log(fmt.Sprintf("MPV playlist: DETECT path placeholder ep=%d mode=%s (was ep=%d prevPath=%s)",
-				ep, mode, curEp, truncateForLog(lastSeenPath, 50)))
+			Log(fmt.Sprintf("MPV playlist: DETECT placeholder row pos=%d → ep %d (%s) (was ep=%d)",
+				targetPos, slot.Episode, slot.Mode, curEp))
 
 			beginMPVPlaylistSwitch()
 			_, _ = MPVSendCommand(c.socket, []interface{}{"set_property", "pause", true})
-			_, _ = MPVSendCommand(c.socket, []interface{}{"show-text", fmt.Sprintf("Loading episode %d…", ep), 5000})
+			_, _ = MPVSendCommand(c.socket, []interface{}{"show-text", fmt.Sprintf("Loading episode %d…", slot.Episode), 5000})
 
-			if posErr == nil && pos >= 0 {
-				c.lastPos = pos
-			}
-			slot := playlistSlot{Episode: ep, Mode: mode, Label: c.episodeLabel(ep, mode)}
+			c.lastPos = targetPos
 			c.handlePlaylistJumpSlot(slot, curEp)
-			lastSeenPath = mpvStringProperty(c.socket, "path")
 			continue
 		}
 
@@ -659,8 +687,7 @@ func (c *MPVPlaylistController) watchPlaylistSelection() {
 				_, _ = MPVSendCommand(c.socket, []interface{}{"set_property", "pause", true})
 				c.lastPos = targetPos
 				c.handlePlaylistJump(targetPos)
-				lastSeenPath = mpvStringProperty(c.socket, "path")
-				continue
+					continue
 			}
 
 			c.mu.Lock()
@@ -679,8 +706,7 @@ func (c *MPVPlaylistController) watchPlaylistSelection() {
 					beginMPVPlaylistSwitch()
 					_, _ = MPVSendCommand(c.socket, []interface{}{"set_property", "pause", true})
 					c.handlePlaylistJumpSlot(slot, curEp)
-					lastSeenPath = mpvStringProperty(c.socket, "path")
-				}
+						}
 				time.Sleep(poll)
 				continue
 			}
@@ -690,12 +716,11 @@ func (c *MPVPlaylistController) watchPlaylistSelection() {
 			_, _ = MPVSendCommand(c.socket, []interface{}{"show-text", fmt.Sprintf("Loading episode %d…", slot.Episode), 5000})
 			c.lastPos = targetPos
 			c.handlePlaylistJumpSlot(slot, curEp)
-			lastSeenPath = mpvStringProperty(c.socket, "path")
 			continue
 		}
 
 		if path != "" {
-			lastSeenPath = path
+
 		}
 		time.Sleep(poll)
 	}
@@ -721,22 +746,15 @@ func (c *MPVPlaylistController) handlePlaylistJumpSlot(slot playlistSlot, curEp 
 		if c.config != nil && c.config.PercentageToMarkComplete > 0 {
 			threshold = c.config.PercentageToMarkComplete
 		}
-		action, pErr := promptPlaylistEpisodeLeave(curEp, slot.Episode, pct, threshold)
-		if pErr != nil {
-			Log(fmt.Sprintf("MPV playlist leave prompt: %v (playing target anyway)", pErr))
-			action = playlistLeaveNone
-		}
-		if action == playlistLeaveCancel {
-			Log("MPV playlist: user cancelled — reloading current ep real stream")
-			// We're sitting on a dummy placeholder; put real current ep back.
-			if err := c.playSlot(playlistSlot{Episode: curEp, Mode: curMode, Label: c.episodeLabel(curEp, curMode)}); err != nil {
-				Log(fmt.Sprintf("MPV playlist: reload current failed: %v", err))
-				endMPVPlaylistSwitch()
-			}
-			return
-		}
-		leaveAction = action
+		// Never interrupt playback with a terminal menu while the user is in
+		// (possibly fullscreen) MPV. Resolve the remote action silently: backward
+		// jumps never regress upstream progress, +1 follows the standard "next"
+		// auto-mark behavior, other forward skips leave progress untouched.
+		leaveAction = resolvePlaylistLeaveDefault(curEp, slot.Episode, pct, threshold)
+		Log(fmt.Sprintf("MPV playlist: SWITCH %d → %d (%s) leave=%s (silent, no session menu)",
+			curEp, slot.Episode, slot.Mode, leaveAction))
 	} else {
+		leaveAction = playlistLeaveNone
 		Log(fmt.Sprintf("MPV playlist: reloading real stream for ep %d (was on placeholder)", curEp))
 	}
 
@@ -851,6 +869,28 @@ func maxInt(a, b int) int {
 	return b
 }
 
+// resolvePlaylistLeaveDefault decides what to do with upstream progress after an
+// MPV-playlist episode pick WITHOUT prompting mid-playback. Rules:
+//   - same episode                       → nothing (mode toggle / reload)
+//   - going backward (toEp < fromEp)     → nothing; never regress the tracker
+//   - forward next (+1) nearly finished  → mark the left episode watched
+//   - any other forward jump             → nothing (surfaced at session end)
+func resolvePlaylistLeaveDefault(fromEp, toEp int, percentageWatched float64, threshold int) playlistLeaveAction {
+	if toEp <= 0 || toEp == fromEp {
+		return playlistLeaveNone
+	}
+	if toEp < fromEp {
+		return playlistLeaveNone
+	}
+	if toEp == fromEp+1 {
+		nearlyDone := int(percentageWatched) >= threshold && percentageWatched > 0
+		if nearlyDone {
+			return playlistLeaveMarkLeft
+		}
+	}
+	return playlistLeaveNone
+}
+
 // resolveSlotAt figures out which episode the user selected at playlist index pos.
 // Order: placeholder filename encode → title → our slots map.
 // Never re-query playlist-pos here — caller freezes the index.
@@ -858,18 +898,6 @@ func (c *MPVPlaylistController) resolveSlotAt(pos int) (playlistSlot, error) {
 	filename, title := c.playlistEntryMeta(pos)
 	Log(fmt.Sprintf("MPV playlist: resolve pos=%d filename=%q title=%q", pos, truncateForLog(filename, 60), title))
 
-	if ep, ok := parseEpisodeFromPlaceholder(filename); ok {
-		mode := c.preferredMode
-		if _, m, ok2 := parsePlaylistEpisodeTitle(title, c.preferredMode); ok2 {
-			mode = m
-		}
-		Log(fmt.Sprintf("MPV playlist: pos %d filename → ep %d (title=%q)", pos, ep, title))
-		label := title
-		if label == "" {
-			label = c.episodeLabel(ep, mode)
-		}
-		return playlistSlot{Episode: ep, Mode: mode, Label: label}, nil
-	}
 	if title != "" {
 		if ep, mode, ok := parsePlaylistEpisodeTitle(title, c.preferredMode); ok {
 			Log(fmt.Sprintf("MPV playlist: pos %d title %q → ep %d (%s)", pos, title, ep, mode))
@@ -1257,6 +1285,10 @@ func (c *MPVPlaylistController) playSlot(slot playlistSlot) error {
 	c.mu.Lock()
 	c.currentPlaying = targetEp
 	c.currentMode = mode
+	// The alternate is always the *other* mode from what is now playing, so after
+	// a sub→dub switch the offered extra row is sub (not dub again). Recompute
+	// here so probeAndAttachAlternateAudio stays symmetric in both directions.
+	c.alternateMode = alternateTranslationType(mode)
 	alreadyAlt := normalizeTranslationType(slot.Mode) == c.alternateMode
 	// After loadfile replace the playlist is a single entry at index 0.
 	c.lastPos = 0
