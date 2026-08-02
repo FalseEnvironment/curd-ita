@@ -534,6 +534,67 @@ func getProviderTotalEpisodes(provider Provider, showID, mode string) (int, erro
 	return 0, fmt.Errorf("provider returned no usable episode numbers")
 }
 
+// determineProviderTotalEpisodes finds the total episode count for an anime by
+// querying the configured provider stack. It first uses the anime's existing
+// provider mapping when one exists, then falls back to searching each provider
+// for the title and reading its episode list. This keeps the total findable
+// even when the preferred provider is down or the anime has no mapping yet
+// (e.g. an anime played straight from a MyAnimeList/AniList tracking list).
+func determineProviderTotalEpisodes(config *CurdConfig, query string, anime *Anime, mode string) (int, error) {
+	if anime == nil {
+		return 0, fmt.Errorf("missing anime")
+	}
+
+	// 1) Use the anime's existing provider mapping when it has one.
+	if providerName, providerID := AnimeProviderID(anime); providerID != "" {
+		if provider, err := ProviderByName(providerName); err == nil {
+			if total, err := getProviderTotalEpisodes(provider, providerID, mode); err == nil && total > 0 {
+				return total, nil
+			}
+		}
+	}
+
+	// 2) Otherwise search each configured provider and read its episode list so
+	// a single down provider can't block the total from being determined.
+	var lookupErrors []string
+	for _, providerName := range configuredProviderNames(config) {
+		provider, err := ProviderByName(providerName)
+		if err != nil {
+			continue
+		}
+		options, err := provider.SearchAnime(query, mode)
+		if err != nil || len(options) == 0 {
+			if err != nil {
+				lookupErrors = append(lookupErrors, fmt.Sprintf("%s search: %v", providerName, err))
+			}
+			continue
+		}
+		searchQuery := strings.TrimSpace(query)
+		if searchQuery == "" {
+			searchQuery = animeSearchTitle(anime)
+		}
+		option, ok := selectBestProviderSearchResult(options, anime, searchQuery)
+		if !ok {
+			continue
+		}
+		providerID := option.Key
+		if _, parsedID, ok := ParseProviderQualifiedID(option.Key); ok {
+			providerID = parsedID
+		}
+		if strings.TrimSpace(providerID) == "" {
+			continue
+		}
+		if total, err := getProviderTotalEpisodes(provider, providerID, mode); err == nil && total > 0 {
+			return total, nil
+		}
+	}
+
+	if len(lookupErrors) > 0 {
+		return 0, fmt.Errorf("could not determine total episodes from any provider: %s", strings.Join(lookupErrors, "; "))
+	}
+	return 0, fmt.Errorf("could not determine total episodes from any provider")
+}
+
 func inferProviderTotalEpisodes(providerName string, episodes []string) int {
 	if strings.EqualFold(providerName, "animepahe") {
 		return countUsableEpisodeEntries(episodes)

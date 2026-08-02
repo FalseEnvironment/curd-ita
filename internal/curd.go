@@ -1144,6 +1144,21 @@ func SetupCurd(userCurdConfig *CurdConfig, anime *Anime, user *User, databaseAni
 			}
 		}
 
+		if anime.TotalEpisodes == 0 { // If the mapped provider alone couldn't provide a total
+			CurdOut("Attempting to determine total episodes from the full provider stack.")
+			totalQuery := animeSearchTitle(anime)
+			if strings.TrimSpace(totalQuery) == "" {
+				totalQuery = string(userQuery)
+			}
+			stackTotal, stackErr := determineProviderTotalEpisodes(userCurdConfig, totalQuery, anime, userCurdConfig.SubOrDub)
+			if stackErr != nil {
+				Log(fmt.Sprintf("Failed to determine total episodes from provider stack: %v", stackErr))
+			} else {
+				anime.TotalEpisodes = stackTotal
+				CurdOut(fmt.Sprintf("Retrieved total episodes from provider stack: %d", anime.TotalEpisodes))
+			}
+		}
+
 		if anime.TotalEpisodes == 0 { // If provider episode list did not have a usable total
 			CurdOut("Attempting to retrieve total episodes from anime search results.")
 			animeList, err := SearchAnime(string(userQuery), userCurdConfig.SubOrDub)
