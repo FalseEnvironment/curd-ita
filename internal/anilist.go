@@ -141,6 +141,7 @@ func min3(a, b, c int) int {
 }
 
 func doAniListSearchRequest(url string, requestBody []byte, token string) ([]byte, error) {
+	token = anilistTokenForAPI(nil, token)
 	for authAttempt := 0; authAttempt < 2; authAttempt++ {
 		body, err := doAniListSearchRequestAttempt(url, requestBody, token)
 		if err == nil {
@@ -928,6 +929,12 @@ func makePostRequest(url, query string, variables map[string]interface{}, header
 		if authHeader := headers["Authorization"]; strings.HasPrefix(authHeader, "Bearer ") {
 			token = strings.TrimPrefix(authHeader, "Bearer ")
 		}
+	}
+	token = anilistTokenForAPI(nil, token)
+	if headers == nil && token != "" {
+		headers = map[string]string{"Authorization": "Bearer " + token}
+	} else if headers != nil && token != "" {
+		headers["Authorization"] = "Bearer " + token
 	}
 
 	for authAttempt := 0; authAttempt < 2; authAttempt++ {
