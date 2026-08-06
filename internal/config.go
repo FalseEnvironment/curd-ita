@@ -76,6 +76,7 @@ type CurdConfig struct {
 	MyAnimeListClientSecret    string   `config:"MyAnimeListClientSecret"`
 	MyAnimeListImported        bool     `config:"MyAnimeListImported"`
 	MyAnimeListImportDismissed bool     `config:"MyAnimeListImportDismissed"`
+	ShowNewEpisodes            bool     `config:"ShowNewEpisodes"`
 }
 
 const (
@@ -137,6 +138,7 @@ func defaultConfigMap() map[string]string {
 		"MyAnimeListClientSecret":    "",
 		"MyAnimeListImported":        "false",
 		"MyAnimeListImportDismissed": "false",
+		"ShowNewEpisodes":            "true",
 	}
 }
 
