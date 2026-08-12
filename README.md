@@ -24,7 +24,8 @@ https://github.com/user-attachments/assets/cbf799bc-9fdd-4402-ab61-b4e31f1e264d
 
 
 ## Features
-- Multiple Content Providers (Senshi, AniNeko, AllAnime, and Animepahe) with ordered fallback and up to 1080p support
+- Multiple Content Providers (AnimeWorld, Senshi, AniNeko, AllAnime, and Animepahe) with ordered fallback and up to 1080p support
+- Italian audio and subtitles via AnimeWorld, with exact AniList matching from the provider's own metadata
 - Built-in headless browser to bypass Cloudflare/DDoS-Guard protections
 - Stream anime online
 - Track anime locally, on AniList, or on MyAnimeList
@@ -399,7 +400,7 @@ If the browser reaches the localhost callback page but curd does not continue au
 | `SaveMpvSpeed`            | Boolean    | `true`, `false`                           | Retains the playback speed set in MPV for next episode.                                           |
 | `SkipFiller`              | Boolean    | `true`, `false`                           | Skips filler episodes when supported.                                                             |
 | `MenuOrder`               | String     | Comma-separated list                      | Controls which menu items appear and their order. Available options: `CURRENT`, `ALL`, `UNTRACKED`, `UPDATE`, `REMAP_PROVIDER`, `CONTINUE_LAST`, `PLANNING`, `COMPLETED`, `PAUSED`, `DROPPED`, `REWATCHING`, `TRACKER`, `PROVIDER`. Only listed items will be shown. Default: `CURRENT,ALL,UNTRACKED,UPDATE,REMAP_PROVIDER,CONTINUE_LAST,TRACKER,PROVIDER` |
-| `Provider`                | List       | `stacked`, `["anipub"]`, `["anineko"]`, `["allanime"]`, `["animepahe"]` | Sets the content-provider fallback list. `stacked` (default) uses the preferred order: senshi → anipub → anineko → allanime → animepahe. A single-provider list uses only that site. AllAnime and Animepahe are disabled by default unless included in `Provider`. Default: `stacked` |
+| `Provider`                | List       | `stacked`, `["animeworld"]`, `["anipub"]`, `["anineko"]`, `["allanime"]`, `["animepahe"]` | Sets the content-provider fallback list. `stacked` (default) uses the preferred order: animeworld → senshi → anipub → anineko → allanime → animepahe. A single-provider list uses only that site. AllAnime and Animepahe are disabled by default unless included in `Provider`. Default: `stacked` |
 | `ManualProviderSearch`    | Boolean    | `true`, `false`                           | Skip automatic provider matching and always show provider search results for manual selection. Displays a hint with the tracker title, format (TV/Movie/etc.), episode count, and sub/dub mode. Default: `false` |
 | `TrackingLocal`           | Boolean    | `true`                                    | Legacy compatibility flag. Local playback history is always enabled.                              |
 | `TrackingRemote`          | Enum       | `none`, `anilist`, `myanimelist`, `anilist+myanimelist` | Selects which remote tracker curd syncs with.                                           |
@@ -407,6 +408,27 @@ If the browser reaches the localhost callback page but curd does not continue au
 | `MyAnimeListClientID`     | String     | MAL OAuth client ID                       | Client ID used for MyAnimeList browser login.                                                     |
 | `MyAnimeListClientSecret` | String     | MAL OAuth client secret                   | Optional secret used for MyAnimeList browser login and token refresh.                             |
 | `MyAnimeListImported`     | Boolean    | `true`, `false`                           | Tracks whether the one-time AniList-to-MyAnimeList import prompt has already been handled.        |
+
+### AnimeWorld (Italian)
+
+AnimeWorld is the default provider and serves Italian subs and dubs from
+`animeworld.ac`. A few things behave differently from the English providers:
+
+- **Subs and dubs are separate catalog entries.** Searching with `-dub` moves the
+  dubbed entries to the top of the results instead of filtering the subbed ones
+  out, so a series without a dub still falls back to the sub.
+- **Matching is exact.** The AnimeWorld search API returns AniList and MyAnimeList
+  IDs for every entry, so curd maps a tracker entry to the right show without
+  guessing by title.
+- **Streams are direct MP4 files** from the in-house server, which mpv plays and
+  seeks natively. Third-party mirrors are only used when they also expose a
+  direct media file.
+- **The domain rotates.** AnimeWorld periodically changes its TLD; point curd at
+  the current one with `CURD_ANIMEWORLD_BASE=https://www.animeworld.xy` without
+  rebuilding.
+
+To use it exclusively, set `Provider=["animeworld"]` in the config.
+
 
 ## Todo (fix)
 - Use Powershell for windows token input instead of notepad or cmd
@@ -424,7 +446,8 @@ If the browser reaches the localhost callback page but curd does not continue au
 - [MyAnimeList API](https://myanimelist.net/apiconfig/references/api/v2) - MyAnimeList OAuth and tracking sync
 - [AniSkip API](https://api.aniskip.com/api-docs) - Get anime intro and outro timings
 - [AllAnime Content](https://allanime.to/) - Fetch anime url
-- [Senshi Project](https://senshi.live/) - Default provider with direct HLS streams and MAL-based catalog matching
+- [AnimeWorld](https://www.animeworld.ac/) - Default provider for Italian subs and dubs, serving direct MP4 streams
+- [Senshi Project](https://senshi.live/) - Provider with direct HLS streams and MAL-based catalog matching
 - [AniPub](https://anipub.xyz/) - Fast JSON catalog APIs with MegaPlay HLS streams
 - [AniNeko Content](https://anineko.to/) - Alternative provider with soft/hard sub stream selection
 - [Animepahe Content](https://animepahe.pw/) - Alternative provider for 1080p streams

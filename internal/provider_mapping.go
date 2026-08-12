@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/wraient/curd/internal/providers/animepahe"
+	"github.com/wraient/curd/internal/providers/animeworld"
 	"github.com/wraient/curd/internal/providers/anipub"
 )
 
@@ -127,6 +128,19 @@ func autoMatchProviderListing(config *CurdConfig, anime *Anime, animeList []Sele
 	anilistRegex := regexp.MustCompile(`anilistcdn/media/anime/cover/(?:large|medium)/(?:bx)?(\d+)`)
 	malRegex := regexp.MustCompile(`myanimelist\.net/images/anime/[^/]+/([^/]+\.jpg)`)
 	senshiPosterRE := regexp.MustCompile(`/posters/(\d+)(?:\.webp)?`)
+
+	// Some providers ship the AniList ID in their search payload, which is an
+	// exact match and beats every heuristic below.
+	if anime.AnilistId != 0 {
+		for i, option := range animeList {
+			if anilistID := anilistIDFromProviderExtraData(option.ExtraData); anilistID == anime.AnilistId {
+				Log(fmt.Sprintf("Checking option %d: Key='%s', Label='%s'", i, option.Key, option.Label))
+				anime.ProviderId = option.Key
+				Log(fmt.Sprintf("Found provider Anilist ID extra-data match! Setting ProviderId to: %s", anime.ProviderId))
+				return true
+			}
+		}
+	}
 
 	if anime.MalId == 0 {
 		anime.MalId, _ = GetAnimeMalID(anime.AnilistId)
@@ -1105,6 +1119,17 @@ func malIDFromProviderExtraData(extra any) int {
 	switch item := extra.(type) {
 	case anipub.SearchItem:
 		return item.MalID
+	case animeworld.SearchItem:
+		return item.MalID
+	default:
+		return 0
+	}
+}
+
+func anilistIDFromProviderExtraData(extra any) int {
+	switch item := extra.(type) {
+	case animeworld.SearchItem:
+		return item.AnilistID
 	default:
 		return 0
 	}
