@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/wraient/curd/internal/providers/animepahe"
+	"github.com/wraient/curd/internal/providers/animeworld"
 	"github.com/wraient/curd/internal/providers/anipub"
 	"github.com/wraient/curd/internal/providers/senshi"
 )
@@ -56,6 +57,9 @@ func episodeCountFromSelectionOption(option SelectionOption) (int, bool) {
 			return item.Episodes, true
 		}
 		if item, ok := option.ExtraData.(anipub.SearchItem); ok && item.Episodes > 0 {
+			return item.Episodes, true
+		}
+		if item, ok := option.ExtraData.(animeworld.SearchItem); ok && item.Episodes > 0 {
 			return item.Episodes, true
 		}
 	}

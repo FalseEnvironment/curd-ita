@@ -29,11 +29,11 @@ func TestConfiguredProviderNamesFiltersDisabledProviders(t *testing.T) {
 		cfg  *CurdConfig
 		want []string
 	}{
-		{name: "empty", cfg: &CurdConfig{}, want: []string{"senshi", "anipub", "anineko"}},
-		{name: "json list", cfg: &CurdConfig{Provider: `["allanime","animepahe"]`}, want: []string{"senshi"}},
-		{name: "animepahe only", cfg: &CurdConfig{Provider: `["animepahe"]`}, want: []string{"senshi"}},
-		{name: "allanime only", cfg: &CurdConfig{Provider: `["allanime"]`}, want: []string{"senshi"}},
-		{name: "legacy alias", cfg: &CurdConfig{Provider: "stacked"}, want: []string{"senshi", "anipub", "anineko"}},
+		{name: "empty", cfg: &CurdConfig{}, want: []string{"animeworld", "senshi", "anipub", "anineko"}},
+		{name: "json list", cfg: &CurdConfig{Provider: `["allanime","animepahe"]`}, want: []string{"animeworld"}},
+		{name: "animepahe only", cfg: &CurdConfig{Provider: `["animepahe"]`}, want: []string{"animeworld"}},
+		{name: "allanime only", cfg: &CurdConfig{Provider: `["allanime"]`}, want: []string{"animeworld"}},
+		{name: "legacy alias", cfg: &CurdConfig{Provider: "stacked"}, want: []string{"animeworld", "senshi", "anipub", "anineko"}},
 	}
 
 	for _, tc := range cases {
