@@ -1,3 +1,10 @@
-
 # local build output
 Build/curd
+
+# makepkg artefacts
+/src/
+/pkg/
+/curd-ita/
+*.pkg.tar.zst
+*.pkg.tar.xz
+*.src.tar.gz
