@@ -1,7 +1,15 @@
-# Curd
+# Curd ITA
 
 A cli application to stream anime with [Anilist](https://anilist.co/) integration and Discord RPC written in golang.
 Works on Linux, MacOS and Windows.
+
+> **This is a fork of [Wraient/curd](https://github.com/Wraient/curd).**
+> It adds [AnimeWorld](https://www.animeworld.ac/) as a content provider, which is the
+> first source in curd to serve **Italian audio and Italian subtitles**. Everything else
+> behaves exactly like upstream curd, and the fork is kept in sync with it.
+>
+> Upstream release binaries and the AUR `curd` package do **not** contain the AnimeWorld
+> provider. To get it, [build this fork from source](#building-from-source).
 
 ## Join the discord server
 
@@ -241,6 +249,22 @@ Option 2: Standalone executable
 - Download [curd-windows-x86_64.exe](https://github.com/Wraient/curd/releases/latest/download/curd-windows-x86_64.exe)
 </details>
 
+## Building from source
+
+The AnimeWorld provider only exists in this fork, so it has to be built from this
+repository. It needs Go 1.22 or newer.
+
+```bash
+git clone https://github.com/FalseEnvironment/curd-ita.git
+cd curd-ita
+go build -o curd ./cmd/curd
+sudo mv curd /usr/local/bin/
+```
+
+Runtime dependencies are the same as upstream (`mpv`, plus `rofi` and `ueberzugpp` for
+the rofi interface); install them with the commands for your distribution in
+[Installing and Setup](#installing-and-setup).
+
 ## Data Storage
 
 <details>
@@ -454,5 +478,7 @@ To use it exclusively, set `Provider=["animeworld"]` in the config.
 - [Jikan](https://jikan.moe/) - Get filler episode number
 
 ## Credits
+- [curd](https://github.com/Wraient/curd) - The upstream project this fork is based on
+- [AnimeWorld-API](https://github.com/MainKronos/AnimeWorld-API) - Reference for the AnimeWorld session and stream flow
 - [ani-cli](https://github.com/pystardust/ani-cli) - Code for fetching anime url
 - [jerry](https://github.com/justchokingaround/jerry) - For the inspiration
