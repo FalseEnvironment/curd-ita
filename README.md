@@ -265,6 +265,15 @@ Runtime dependencies are the same as upstream (`mpv`, plus `rofi` and `ueberzugp
 the rofi interface); install them with the commands for your distribution in
 [Installing and Setup](#installing-and-setup).
 
+On Arch Linux the `PKGBUILD` in this repository builds the fork from source and
+installs it as `curd-ita`, replacing the AUR `curd` package:
+
+```bash
+makepkg -si
+```
+
+Nix users can build the fork with `nix build github:FalseEnvironment/curd-ita`.
+
 ## Data Storage
 
 <details>
