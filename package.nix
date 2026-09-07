@@ -40,11 +40,10 @@ in
     '';
 
     meta = {
-      description = "Watch anime in CLI with AniList Tracking, Discord RPC, and automatic intro/outro skipping";
-      homepage = "https://github.com/Wraient/curd";
+      description = "Watch anime in CLI with AniList Tracking, Discord RPC, automatic intro/outro skipping, and Italian subs and dubs via AnimeWorld";
+      homepage = "https://github.com/FalseEnvironment/curd-ita";
       license = lib.licenses.gpl3;
       platforms = lib.platforms.unix;
-      maintainers = [lib.maintainers.diniamo];
       mainProgram = "curd";
     };
   }
