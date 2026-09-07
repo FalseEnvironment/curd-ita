@@ -1,258 +1,34 @@
 # Curd ITA
 
-A cli application to stream anime with [Anilist](https://anilist.co/) integration and Discord RPC written in golang.
-Works on Linux, MacOS and Windows.
+A CLI application to stream anime with [AniList](https://anilist.co/) integration and
+Discord RPC, written in Go. Works on Linux, MacOS and Windows.
 
 > **This is a fork of [Wraient/curd](https://github.com/Wraient/curd).**
-> It adds [AnimeWorld](https://www.animeworld.ac/) as a content provider, which is the
-> first source in curd to serve **Italian audio and Italian subtitles**. Everything else
-> behaves exactly like upstream curd, and the fork is kept in sync with it.
+> It adds [AnimeWorld](https://www.animeworld.ac/) as a content provider, the first
+> source in curd to serve **Italian audio and Italian subtitles**, and enables it as
+> the only provider by default. Everything else behaves like upstream curd.
 >
-> Upstream release binaries and the AUR `curd` package do **not** contain the AnimeWorld
-> provider. To get it, [build this fork from source](#building-from-source).
-
-## Join the discord server
-
-https://discord.gg/rrpBfu2gHq
-
-## Join the Matrix server
-
-https://matrix.to/#/#curd:matrix.org
-
-## Demo Video
-Normal mode:
-
-
-https://github.com/user-attachments/assets/376e7580-b1af-40ee-82c3-154191f75b79
-
-Rofi with Image preview
-
-
-https://github.com/user-attachments/assets/cbf799bc-9fdd-4402-ab61-b4e31f1e264d
-
+> Upstream release binaries and the AUR `curd` package do **not** contain the
+> AnimeWorld provider, so this fork has to be [built from source](#install).
 
 ## Features
-- Multiple Content Providers (AnimeWorld, Senshi, AniNeko, AllAnime, and Animepahe) with ordered fallback and up to 1080p support
-- Italian audio and subtitles via AnimeWorld, with exact AniList matching from the provider's own metadata
-- Built-in headless browser to bypass Cloudflare/DDoS-Guard protections
-- Stream anime online
-- Track anime locally, on AniList, or on MyAnimeList
-- Browser-based AniList and MyAnimeList login flows
-- Skip anime Intro and Outro
-- Skip Filler and Recap episodes
-- Discord RPC about the anime
-- Rofi support
-- Image preview in rofi
-- Local anime history to continue from where you left off last time
-- Save mpv speed for next episode
-- Configurable through config file
 
+Everything upstream curd does — AniList/MyAnimeList/local tracking, intro, outro,
+filler and recap skipping, Discord RPC, rofi with image previews, resume from where
+you left off — plus:
 
-## Installing and Setup
-> **Note**: `Curd` requires `mpv`, `rofi`, and `ueberzugpp` for Rofi support and image preview. These are included in the installation instructions below for each distribution.
+- Italian audio and subtitles through AnimeWorld, matched to AniList by the
+  provider's own IDs instead of by title
+- Multiple providers with ordered fallback (AnimeWorld, Senshi, AniPub, AniNeko,
+  AllAnime, Animepahe) at up to 1080p
 
-### Linux
-<details>
-<summary>Arch Linux / Manjaro (AUR-based systems)</summary>
+Upstream's [README](https://github.com/Wraient/curd#readme) covers the shared
+features, demo videos and the community links in more detail.
 
-Using Yay:
+## Install
 
-```bash
-yay -Sy curd
-```
-
-or using Paru:
-
-```bash
-paru -Sy curd
-```
-
-Or, to manually clone and install:
-
-```bash
-git clone https://aur.archlinux.org/curd.git
-cd curd
-makepkg -si
-sudo pacman -S rofi ueberzugpp
-```
-</details>
-
-<details>
-<summary>Debian / Ubuntu (and derivatives)</summary>
-
-```bash
-sudo apt update
-sudo apt install mpv curl rofi ueberzugpp
-
-# For x86_64 systems:
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-linux-x86_64
-
-# For ARM64 systems:
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-linux-arm64
-
-chmod +x curd
-sudo mv curd /usr/bin/
-curd
-```
-</details>
-
-<details>
-<summary>Fedora Installation</summary>
-
-```bash
-sudo dnf update
-sudo dnf install mpv curl rofi ueberzugpp
-
-# For x86_64 systems:
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-linux-x86_64
-
-# For ARM64 systems:
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-linux-arm64
-
-chmod +x curd
-sudo mv curd /usr/bin/
-curd
-```
-</details>
-
-<details>
-<summary>openSUSE Installation</summary>
-
-```bash
-sudo zypper refresh
-sudo zypper install mpv curl rofi ueberzugpp
-
-# For x86_64 systems:
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-linux-x86_64
-
-# For ARM64 systems:
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-linux-arm64
-
-chmod +x curd
-sudo mv curd /usr/bin/
-curd
-```
-</details>
-
-<details>
-<summary>NixOS Installation</summary>
-
-1. Add curd as a flake input, for example:
-```nix
-{
-    inputs = {
-        nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-        curd = {
-            url = "github:Wraient/curd";
-            inputs.nixpkgs.follows = "nixpkgs";
-        };
-    }
-}
-```
-2. Install the package, for example:
-```nix
-{inputs, pkgs, ...}: {
-  environment.systemPackages = [
-    inputs.curd.packages.${pkgs.system}.default
-  ];
-}
-```
-
-</details>
-
-<details>
-<summary>Generic Installation</summary>
-
-Choose the appropriate binary for your system:
-```bash
-# For Linux x86_64:
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-linux-x86_64
-
-# For Linux ARM64:
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-linux-arm64
-
-chmod +x curd
-sudo mv curd /usr/bin/
-curd
-```
-</details>
-
-<details>
-<summary>Uninstallation</summary>
-
-```bash
-sudo rm /usr/bin/curd
-```
-
-For AUR-based distributions:
-
-```bash
-yay -R curd
-```
-</details>
-
-### MacOS
-
-<details>
-<summary>MacOS Installation</summary>
-
-Install required dependencies
-```bash
-brew install mpv curl
-```
-
-Download the appropriate binary for your system:
-
-- For Apple Silicon (M1/M2) Macs:
-```bash
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-macos-arm64
-```
-
-- For Intel Macs:
-```bash
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-macos-x86_64
-```
-
-- For Universal Binary (works on both architectures):
-```bash
-curl -Lo curd https://github.com/Wraient/curd/releases/latest/download/curd-macos-universal
-```
-
-Then complete the installation:
-
-```bash
-chmod +x curd
-sudo mv curd /usr/local/bin/
-curd
-```
-
-</details>
-
-<details>
-<summary>Uninstallation</summary>
-
-```bash
-sudo rm /usr/local/bin/curd
-```
-
-</details>
-
-### Windows
-
-<details>
-<summary>Windows Installation</summary>
-
-Option 1: Using the installer
-- Download and run the [Windows Installer](https://github.com/Wraient/curd/releases/latest/download/curd-windows-installer.exe)
-
-Option 2: Standalone executable
-- Download [curd-windows-x86_64.exe](https://github.com/Wraient/curd/releases/latest/download/curd-windows-x86_64.exe)
-</details>
-
-## Building from source
-
-The AnimeWorld provider only exists in this fork, so it has to be built from this
-repository. It needs Go 1.22 or newer.
+Requires Go 1.22 or newer. Runtime dependencies are `mpv`, plus `rofi` and
+`ueberzugpp` for the rofi interface.
 
 ```bash
 git clone https://github.com/FalseEnvironment/curd-ita.git
@@ -261,128 +37,55 @@ go build -o curd ./cmd/curd
 sudo mv curd /usr/local/bin/
 ```
 
-Runtime dependencies are the same as upstream (`mpv`, plus `rofi` and `ueberzugpp` for
-the rofi interface); install them with the commands for your distribution in
-[Installing and Setup](#installing-and-setup).
-
-On Arch Linux the `PKGBUILD` in this repository builds the fork from source and
-installs it as `curd-ita`, replacing the AUR `curd` package:
+On Arch Linux the bundled `PKGBUILD` builds the fork and installs it as `curd-ita`,
+replacing the AUR `curd` package:
 
 ```bash
 makepkg -si
 ```
 
-Nix users can build the fork with `nix build github:FalseEnvironment/curd-ita`.
-
-## Data Storage
-
-<details>
-<summary>Windows</summary>
-Stroage: (Token, Timestamps, debug.log, etc) 
-
-```bash
-C:\.local\share\curd
-```
-
-Config : 
-
-```bash
-C:\Users\USERNAME\AppData\Roaming\Curd
-```
-
-</details>
-
-<details>
-<summary>Linux/Unix</summary>
-Stroage: (Token, Timestamps, debug.log, etc)
-
-```bash
-$USER/.local/share/curd
-```
-
-Config : 
-
-```bash
-$USER/.config/curd
-```
-
-</details>
+Nix users can build it with `nix build github:FalseEnvironment/curd-ita`.
 
 ## Usage
-
-Run `curd` with the following options:
 
 ```bash
 curd [options]
 ```
 
-### Arguments would always take precedence over configuration
+Command-line arguments always take precedence over the config file.
 
-> **Note**:
-> - To use rofi you need rofi and ueberzug installed.
-> - Rofi .rasi files are at default `~/.local/share/curd/`
-> - You can edit them as you like.
-> - If there are no rasi files with specific names, they would be downloaded from this repo.
+| Flag              | Description                        |
+| ----------------- | ---------------------------------- |
+| `-c`              | Continue the last episode          |
+| `-new`            | Add a new anime to your list       |
+| `-sub` / `-dub`   | Watch the subbed or dubbed version |
+| `-rofi`           | Open the selection menu in rofi    |
+| `-image-preview`  | Show image previews (rofi only)    |
+| `-e`              | Edit the configuration file        |
+| `-change-token`   | Change your authentication token   |
+| `-u`              | Update the binary                  |
+| `-v`              | Show the curd version              |
 
-
-### Options
-
-| Flag                      | Description                                                             | Default       |
-|---------------------------|-------------------------------------------------------------------------|---------------|
-| `-c`                      | Continue the last episode                                              | -             |
-| `-change-token`           | Change your authentication token                                       | -             |
-| `-dub`                    | Watch the dubbed version of the anime                                  | -             |
-| `-sub`                    | Watch the subbed version of the anime                                  | -             |
-| `-softsub`                | Prefer soft subtitles when available (AniNeko)                         | -             |
-| `-hardsub`                | Prefer hard subtitles when available (AniNeko)                         | -             |
-| `-new`                    | Add a new anime to your list                                           | -             |
-| `-e`                      | Edit the configuration file                                            | -             |
-| `-skip-op`                | Automatically skip the opening section of each episode                 | `true`        |
-| `-skip-ed`                | Automatically skip the ending section of each episode                  | `true`        |
-| `-skip-filler`            | Automatically skip filler episodes                                     | `true`        |
-| `-skip-recap`             | Automatically skip recap sections                                      | `true`        |
-| `-discord-presence`       | Enable or disable Discord presence                                     | `true`        |
-| `-image-preview`          | Show an image preview of the anime                                     | -             |
-| `-no-image-preview`       | Disable image preview                                                  | -             |
-| `-next-episode-prompt`    | Prompt for the next episode after completing one                       | -             |
-| `-rofi`                   | Open anime selection in the rofi interface                             | -             |
-| `-no-rofi`                | Disable rofi interface                                                 | -             |
-| `-percentage-to-mark-complete` | Set the percentage watched to mark an episode as complete       | `85`          |
-| `-player`                 | Specify the player to use for playback                                 | `"mpv"`       |
-| `-save-mpv-speed`         | Save the current MPV speed setting for future sessions                 | `true`        |
-| `-score-on-completion`    | Prompt to score the episode on completion                              | `true`        |
-| `-storage-path`           | Path to the storage directory                                          | `"$HOME/.local/share/curd"` |
-| `-subs-lang`              | Set the language for subtitles                                         | `"english"`   |
-| `-u`                      | Update the script                                                      | -             |
-| `-v`                      | Show curd version                                                      | -             |
-
-### Examples
-
-- **Continue the Last Episode**:
-  ```bash
-  curd -c
-  ```
-
-- **Add a New Anime**:
-  ```bash
-  curd -percentage-to-mark-complete=90
-  ```
-
-- **Play with Rofi and Image Preview**:
-  ```bash
-  curd -rofi -image-preview
-  ```
+`curd -h` lists every flag, including the skip toggles (`-skip-op`, `-skip-ed`,
+`-skip-filler`, `-skip-recap`), `-player`, `-storage-path` and
+`-percentage-to-mark-complete`. Each one maps to a config option of the same name.
 
 ## Configuration
 
-All configurations are stored in a file you can edit with the `-e` option.
+Config lives at `~/.config/curd/curd.conf` (`%APPDATA%\Curd` on Windows) and is
+editable with `curd -e`. Data — tokens, timestamps, `debug.log`, rofi `.rasi` themes —
+lives at `~/.local/share/curd`.
 
-```bash
-curd -e
-```
+Every option and its valid values are documented in
+[upstream's configuration table](https://github.com/Wraient/curd#configuration). The
+options that differ in this fork:
 
-Script is made in a way that you use it for one session of watching.
+| Option     | Valid values                                                      | Description                                                                                                                                             |
+| ---------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Provider` | `["animeworld"]` (default), `stacked`, or any single-provider list | `["animeworld"]` plays Italian only, with no fallback. `stacked` uses the upstream chain: animeworld → senshi → anipub → anineko → allanime → animepahe. |
+| `SubOrDub` | `sub` (default), `dub`                                            | On AnimeWorld, `sub` means Italian subtitles and `dub` means Italian audio.                                                                              |
 
+<<<<<<< HEAD
 You can quit it anytime and the resume time would be saved in the history file
 
 more settings can be found at config file.
@@ -449,25 +152,30 @@ If the browser reaches the localhost callback page but curd does not continue au
 | `MyAnimeListClientID`     | String     | MAL OAuth client ID                       | Client ID used for MyAnimeList browser login.                                                     |
 | `MyAnimeListClientSecret` | String     | MAL OAuth client secret                   | Optional secret used for MyAnimeList browser login and token refresh.                             |
 | `MyAnimeListImported`     | Boolean    | `true`, `false`                           | Tracks whether the one-time AniList-to-MyAnimeList import prompt has already been handled.        |
+=======
+On first start curd asks which tracking mode to use: local, `anilist`,
+`myanimelist`, or both. MyAnimeList login needs your own OAuth credentials, set in
+the config or through `CURD_MAL_CLIENT_ID` and `CURD_MAL_CLIENT_SECRET`.
+>>>>>>> f21b953 (docs: trim the README and add CLAUDE.md)
 
 ### AnimeWorld (Italian)
 
-AnimeWorld is the only provider enabled by default and serves Italian subs and dubs from
-`animeworld.ac`. A few things behave differently from the English providers:
+AnimeWorld is the only provider enabled by default and streams from
+`animeworld.ac`. It behaves differently from the English providers:
 
-- **Subs and dubs are separate catalog entries.** Searching with `-dub` moves the
-  dubbed entries to the top of the results instead of filtering the subbed ones
-  out, so a series without a dub still falls back to the sub.
-- **Matching is exact.** The AnimeWorld search API returns AniList and MyAnimeList
-  IDs for every entry, so curd maps a tracker entry to the right show without
-  guessing by title.
-- **Streams are direct MP4 files** from the in-house server, which mpv plays and
-  seeks natively. Third-party mirrors are only used when they also expose a
-  direct media file.
-- **The domain rotates.** AnimeWorld periodically changes its TLD; point curd at
-  the current one with `CURD_ANIMEWORLD_BASE=https://www.animeworld.xy` without
+- **Subs and dubs are separate catalog entries.** `-dub` moves the dubbed entries to
+  the top of the results rather than filtering the subbed ones out, so a series
+  without a dub still falls back to the sub.
+- **Matching is exact.** The search API returns AniList and MyAnimeList IDs for every
+  entry, so curd maps a tracker entry to the right show without guessing by title.
+- **Streams are direct MP4 files** from the in-house server, which mpv plays and seeks
+  natively. Third-party mirrors are only used when they also expose a direct media
+  file.
+- **The domain rotates.** AnimeWorld periodically changes its TLD; point curd at the
+  current one with `CURD_ANIMEWORLD_BASE=https://www.animeworld.xy` instead of
   rebuilding.
 
+<<<<<<< HEAD
 This fork ships `Provider=["animeworld"]` as the default, so a fresh install plays
 Italian only. To also fall back to the English providers when AnimeWorld has no
 match, set `Provider=stacked` in the config.
@@ -500,8 +208,17 @@ match, set `Provider=stacked` in the config.
 - [Animepahe Content](https://animepahe.pw/) - Alternative provider for 1080p streams
 - [Jikan](https://jikan.moe/) - Get filler episode number
 
+=======
+>>>>>>> f21b953 (docs: trim the README and add CLAUDE.md)
 ## Credits
-- [curd](https://github.com/Wraient/curd) - The upstream project this fork is based on
-- [AnimeWorld-API](https://github.com/MainKronos/AnimeWorld-API) - Reference for the AnimeWorld session and stream flow
-- [ani-cli](https://github.com/pystardust/ani-cli) - Code for fetching anime url
-- [jerry](https://github.com/justchokingaround/jerry) - For the inspiration
+
+- [curd](https://github.com/Wraient/curd) — the upstream project this fork is based on
+- [AnimeWorld-API](https://github.com/MainKronos/AnimeWorld-API) — reference for the
+  AnimeWorld session and stream flow
+- [ani-cli](https://github.com/pystardust/ani-cli) — code for fetching anime URLs
+- [jerry](https://github.com/justchokingaround/jerry) — for the inspiration
+
+Curd talks to the [AniList](https://anilist.gitbook.io/anilist-apiv2-docs),
+[MyAnimeList](https://myanimelist.net/apiconfig/references/api/v2),
+[AniSkip](https://api.aniskip.com/api-docs) and [Jikan](https://jikan.moe/) APIs, and
+to the provider sites listed above.
