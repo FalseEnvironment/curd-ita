@@ -80,3 +80,23 @@ func TestProviderByNameAllowsDisabledProviderWhenOverridden(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultConfigProviderIsAnimeworldOnly(t *testing.T) {
+	// Arrange
+	defaults := defaultConfigMap()
+
+	// Act
+	raw := defaults["Provider"]
+	names := ConfiguredProviderNames(&CurdConfig{Provider: raw})
+
+	// Assert
+	if raw != `["animeworld"]` {
+		t.Fatalf("default Provider = %q, want [\"animeworld\"]", raw)
+	}
+	if canonical := canonicalProviderConfigValue(raw); canonical != raw {
+		t.Fatalf("default Provider is rewritten to %q on load", canonical)
+	}
+	if len(names) != 1 || names[0] != "animeworld" {
+		t.Fatalf("default provider stack = %v, want [animeworld]", names)
+	}
+}

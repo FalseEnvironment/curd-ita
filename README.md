@@ -433,7 +433,7 @@ If the browser reaches the localhost callback page but curd does not continue au
 | `SaveMpvSpeed`            | Boolean    | `true`, `false`                           | Retains the playback speed set in MPV for next episode.                                           |
 | `SkipFiller`              | Boolean    | `true`, `false`                           | Skips filler episodes when supported.                                                             |
 | `MenuOrder`               | String     | Comma-separated list                      | Controls which menu items appear and their order. Available options: `CURRENT`, `ALL`, `UNTRACKED`, `UPDATE`, `REMAP_PROVIDER`, `CONTINUE_LAST`, `PLANNING`, `COMPLETED`, `PAUSED`, `DROPPED`, `REWATCHING`, `TRACKER`, `PROVIDER`. Only listed items will be shown. Default: `CURRENT,ALL,UNTRACKED,UPDATE,REMAP_PROVIDER,CONTINUE_LAST,TRACKER,PROVIDER` |
-| `Provider`                | List       | `stacked`, `["animeworld"]`, `["anipub"]`, `["anineko"]`, `["allanime"]`, `["animepahe"]` | Sets the content-provider fallback list. `stacked` (default) uses the preferred order: animeworld → senshi → anipub → anineko → allanime → animepahe. A single-provider list uses only that site. AllAnime and Animepahe are disabled by default unless included in `Provider`. Default: `stacked` |
+| `Provider`                | List       | `stacked`, `["animeworld"]`, `["anipub"]`, `["anineko"]`, `["allanime"]`, `["animepahe"]` | Sets the content-provider fallback list. Default in this fork is `["animeworld"]`, which serves Italian subs and dubs only, with no fallback to the English providers. `stacked` uses the preferred order: animeworld → senshi → anipub → anineko → allanime → animepahe. A single-provider list uses only that site. AllAnime and Animepahe are disabled by default unless included in `Provider`. Default: `["animeworld"]` |
 | `ManualProviderSearch`    | Boolean    | `true`, `false`                           | Skip automatic provider matching and always show provider search results for manual selection. Displays a hint with the tracker title, format (TV/Movie/etc.), episode count, and sub/dub mode. Default: `false` |
 | `TrackingLocal`           | Boolean    | `true`                                    | Legacy compatibility flag. Local playback history is always enabled.                              |
 | `TrackingRemote`          | Enum       | `none`, `anilist`, `myanimelist`, `anilist+myanimelist` | Selects which remote tracker curd syncs with.                                           |
@@ -444,7 +444,7 @@ If the browser reaches the localhost callback page but curd does not continue au
 
 ### AnimeWorld (Italian)
 
-AnimeWorld is the default provider and serves Italian subs and dubs from
+AnimeWorld is the only provider enabled by default and serves Italian subs and dubs from
 `animeworld.ac`. A few things behave differently from the English providers:
 
 - **Subs and dubs are separate catalog entries.** Searching with `-dub` moves the
@@ -460,7 +460,9 @@ AnimeWorld is the default provider and serves Italian subs and dubs from
   the current one with `CURD_ANIMEWORLD_BASE=https://www.animeworld.xy` without
   rebuilding.
 
-To use it exclusively, set `Provider=["animeworld"]` in the config.
+This fork ships `Provider=["animeworld"]` as the default, so a fresh install plays
+Italian only. To also fall back to the English providers when AnimeWorld has no
+match, set `Provider=stacked` in the config.
 
 
 ## Todo (fix)

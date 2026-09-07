@@ -128,7 +128,7 @@ func defaultConfigMap() map[string]string {
 		"VimKeys":                    "false",
 		"CheckUpdates":               "true",
 		"MpvEpisodePlaylist":         "true",
-		"Provider":                   "stacked",
+		"Provider":                   `["animeworld"]`,
 		"DisabledProviders":          "[]",
 		"ManualProviderSearch":       "false",
 		"TrackingLocal":              "true",
