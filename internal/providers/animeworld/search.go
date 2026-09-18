@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,12 +18,49 @@ type searchResponse struct {
 	Error  json.RawMessage              `json:"error"`
 }
 
+// AniList titles say "3rd season" or "Season 3" where AnimeWorld just appends
+// the number, and the site search does not match the long form.
+var (
+	ordinalSeasonRE = regexp.MustCompile(`(?i)\b(\d+)(?:st|nd|rd|th)\s+season\b`)
+	seasonNumberRE  = regexp.MustCompile(`(?i)\bseason\s+(\d+)\b`)
+)
+
+// searchQueries returns the query followed by a season-number variant, if any.
+func searchQueries(query string) []string {
+	variant := ordinalSeasonRE.ReplaceAllString(query, "$1")
+	variant = seasonNumberRE.ReplaceAllString(variant, "$1")
+	variant = strings.Join(strings.Fields(variant), " ")
+	if variant == "" || variant == query {
+		return []string{query}
+	}
+	return []string{query, variant}
+}
+
 func searchAnime(query, mode string) ([]providers.SelectionOption, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, fmt.Errorf("empty search query")
 	}
 
+	var options []providers.SelectionOption
+	for _, candidate := range searchQueries(query) {
+		found, err := searchOnce(candidate)
+		if err != nil {
+			return nil, err
+		}
+		if len(found) > 0 {
+			options = found
+			break
+		}
+	}
+	if len(options) == 0 {
+		return nil, fmt.Errorf("no results for %q", query)
+	}
+
+	return sortByMode(options, mode), nil
+}
+
+func searchOnce(query string) ([]providers.SelectionOption, error) {
 	rawURL := fmt.Sprintf("%s/api/search/v2?keyword=%s", baseURL, url.QueryEscape(query))
 	body, err := fetch(http.MethodPost, rawURL)
 	if err != nil {
@@ -45,11 +83,7 @@ func searchAnime(query, mode string) ([]providers.SelectionOption, error) {
 		}
 		options = append(options, option)
 	}
-	if len(options) == 0 {
-		return nil, fmt.Errorf("no results for %q", query)
-	}
-
-	return sortByMode(options, mode), nil
+	return options, nil
 }
 
 func toSelectionOption(entry map[string]json.RawMessage) (providers.SelectionOption, bool) {
