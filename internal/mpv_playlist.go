@@ -619,7 +619,8 @@ func (c *MPVPlaylistController) watchPlaylistSelection() {
 		}
 		movedOffLive := isPlaceholderPath(path) || (posErr == nil && pos >= 0 && pos != c.lastPos)
 		if movedOffLive {
-			if slot, ok := c.naturalEndSlot(haveRemaining, lastRemaining); ok {
+			Log(fmt.Sprintf("MPV playlist: left live stream, last time-remaining=%.1f (have=%v)", lastRemaining, haveRemaining))
+			if slot, ok := c.naturalEndSlot(haveRemaining, c.effectiveRemaining(lastRemaining)); ok {
 				haveRemaining = false
 				c.playNaturalNext(slot, pos)
 				continue
@@ -772,6 +773,24 @@ func (c *MPVPlaylistController) naturalEndSlot(haveRemaining bool, remaining flo
 		}
 	}
 	return playlistSlot{}, false
+}
+
+// effectiveRemaining returns 0 when the last sample was inside an ending that
+// the ED skip jumps over to the end of the file. That seek hits EOF within
+// milliseconds, so the poll loop never sees the last seconds of the stream.
+func (c *MPVPlaylistController) effectiveRemaining(remaining float64) float64 {
+	if c.config == nil || !c.config.SkipEd || c.anime == nil {
+		return remaining
+	}
+	ed := c.anime.Ep.SkipTimes.Ed
+	duration := float64(c.anime.Ep.Duration)
+	if ed.Start == ed.End || duration <= 0 || float64(ed.End) < duration-mpvNaturalEndSlack {
+		return remaining
+	}
+	if duration-remaining >= float64(ed.Start)-mpvNaturalEndSlack {
+		return 0
+	}
+	return remaining
 }
 
 // liveTimeRemaining reads mpv's time-remaining for the stream now playing.
