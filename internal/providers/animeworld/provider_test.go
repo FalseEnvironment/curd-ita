@@ -240,3 +240,22 @@ func TestProviderNameAndRegistration(t *testing.T) {
 		t.Errorf("alias resolved to %q", instance.Name())
 	}
 }
+
+func TestSearchQueriesAddsSeasonNumberVariant(t *testing.T) {
+	cases := map[string][]string{
+		"Arifureta Shokugyou de Sekai Saikyou 3rd season": {"Arifureta Shokugyou de Sekai Saikyou 3rd season", "Arifureta Shokugyou de Sekai Saikyou 3"},
+		"Kimetsu no Yaiba Season 2":                       {"Kimetsu no Yaiba Season 2", "Kimetsu no Yaiba 2"},
+		"One Piece":                                       {"One Piece"},
+	}
+	for input, want := range cases {
+		got := searchQueries(input)
+		if len(got) != len(want) {
+			t.Fatalf("searchQueries(%q) = %q, want %q", input, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("searchQueries(%q) = %q, want %q", input, got, want)
+			}
+		}
+	}
+}
