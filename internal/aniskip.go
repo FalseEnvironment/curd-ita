@@ -59,6 +59,10 @@ func RoundTime(timeValue float64, precision int) float64 {
 
 // ParseAniSkipResponse parses the response text from the AniSkip API and updates the Anime struct
 func ParseAniSkipResponse(responseText string, anime *Anime, timePrecision int) error {
+	// Drop the previous episode's times so an episode without AniSkip data
+	// does not skip at the old positions.
+	anime.Ep.SkipTimes = SkipTimes{}
+
 	if responseText == "" {
 		return fmt.Errorf("response text is empty")
 	}
@@ -97,6 +101,7 @@ func ParseAniSkipResponse(responseText string, anime *Anime, timePrecision int) 
 func GetAndParseAniSkipData(animeMalId int, episode int, timePrecision int, anime *Anime) error {
 	responseText, err := GetAniSkipData(animeMalId, episode)
 	if err != nil {
+		anime.Ep.SkipTimes = SkipTimes{}
 		return err
 	}
 	return ParseAniSkipResponse(responseText, anime, timePrecision)
