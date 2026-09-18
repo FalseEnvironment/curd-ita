@@ -442,3 +442,39 @@ func TestLocalHistoryPath(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestNaturalEndSlotAdvancesToNextEpisodeInCurrentMode(t *testing.T) {
+	c := &MPVPlaylistController{
+		anime:          &Anime{Title: AnimeTitle{English: "Demo"}},
+		episodeNums:    []int{1, 2, 12, 13, 14, 17},
+		currentPlaying: 13,
+		currentMode:    "sub",
+		preferredMode:  "sub",
+	}
+
+	slot, ok := c.naturalEndSlot(true, 0.2)
+
+	if !ok || slot.Episode != 14 || slot.Mode != "sub" {
+		t.Fatalf("naturalEndSlot = %+v, %v; want ep 14 sub", slot, ok)
+	}
+}
+
+func TestNaturalEndSlotIgnoresPicksBeforeTheEnd(t *testing.T) {
+	c := &MPVPlaylistController{
+		anime:          &Anime{Title: AnimeTitle{English: "Demo"}},
+		episodeNums:    []int{1, 2, 3},
+		currentPlaying: 2,
+		currentMode:    "sub",
+	}
+
+	if _, ok := c.naturalEndSlot(true, 600); ok {
+		t.Fatal("a pick mid-episode must not count as the episode ending")
+	}
+	if _, ok := c.naturalEndSlot(false, 0); ok {
+		t.Fatal("no time-remaining sample must not count as the episode ending")
+	}
+	c.currentPlaying = 3
+	if _, ok := c.naturalEndSlot(true, 0.1); ok {
+		t.Fatal("the last episode has no next episode to advance to")
+	}
+}

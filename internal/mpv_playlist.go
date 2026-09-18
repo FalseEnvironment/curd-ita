@@ -587,6 +587,10 @@ func (c *MPVPlaylistController) watchPlaylistSelection() {
 	var samplePos int
 	haveSample := false
 	lastHeartbeat := time.Time{}
+	// Last time-remaining seen on the live stream, to tell an episode ending
+	// from a user pick.
+	var lastRemaining float64
+	haveRemaining := false
 
 	for {
 		if c.closed() {
@@ -606,6 +610,22 @@ func (c *MPVPlaylistController) watchPlaylistSelection() {
 
 		path := mpvStringProperty(c.socket, "path")
 		pos, posErr := c.playlistPos()
+
+		if path != "" && !isPlaceholderPath(path) {
+			if remaining, ok := c.liveTimeRemaining(); ok {
+				lastRemaining = remaining
+				haveRemaining = true
+			}
+		}
+		movedOffLive := isPlaceholderPath(path) || (posErr == nil && pos >= 0 && pos != c.lastPos)
+		if movedOffLive {
+			if slot, ok := c.naturalEndSlot(haveRemaining, lastRemaining); ok {
+				haveRemaining = false
+				c.playNaturalNext(slot, pos)
+				continue
+			}
+			haveRemaining = false
+		}
 
 		// Heartbeat ~once a second: captures mpv's real reported state over time
 		// even when nothing changes, so we can prove what mpv does on a click.
@@ -724,6 +744,60 @@ func (c *MPVPlaylistController) watchPlaylistSelection() {
 		}
 		time.Sleep(poll)
 	}
+}
+
+// mpvNaturalEndSlack is how close to the end the live stream must have been for
+// a playlist move to count as the episode finishing rather than a user pick.
+const mpvNaturalEndSlack = 3.0
+
+// naturalEndSlot returns the next episode in the current mode when the live
+// stream was at its end. When an episode finishes, mpv moves to whatever entry
+// it picks next (logs showed pos 12 → 0, i.e. episode 1, and the next entry can
+// also be the alternate-audio row of the same episode), so that entry must not
+// decide which episode plays.
+func (c *MPVPlaylistController) naturalEndSlot(haveRemaining bool, remaining float64) (playlistSlot, bool) {
+	if !haveRemaining || remaining > mpvNaturalEndSlack {
+		return playlistSlot{}, false
+	}
+	c.mu.Lock()
+	curEp := c.currentPlaying
+	mode := c.currentMode
+	c.mu.Unlock()
+	if mode == "" {
+		mode = c.preferredMode
+	}
+	for _, ep := range c.episodeNums {
+		if ep > curEp {
+			return playlistSlot{Episode: ep, Mode: mode, Label: c.episodeLabel(ep, mode)}, true
+		}
+	}
+	return playlistSlot{}, false
+}
+
+// liveTimeRemaining reads mpv's time-remaining for the stream now playing.
+func (c *MPVPlaylistController) liveTimeRemaining() (float64, bool) {
+	v, err := MPVSendCommand(c.socket, []interface{}{"get_property", "time-remaining"})
+	if err != nil {
+		return 0, false
+	}
+	remaining, ok := v.(float64)
+	return remaining, ok
+}
+
+// playNaturalNext switches to slot after the live episode reached its end.
+func (c *MPVPlaylistController) playNaturalNext(slot playlistSlot, targetPos int) {
+	c.mu.Lock()
+	curEp := c.currentPlaying
+	c.mu.Unlock()
+
+	Log(fmt.Sprintf("MPV playlist: ep %d ended, advancing to ep %d (%s) instead of pos %d",
+		curEp, slot.Episode, slot.Mode, targetPos))
+
+	beginMPVPlaylistSwitch()
+	_, _ = MPVSendCommand(c.socket, []interface{}{"set_property", "pause", true})
+	_, _ = MPVSendCommand(c.socket, []interface{}{"show-text", fmt.Sprintf("Loading episode %d…", slot.Episode), 5000})
+	c.lastPos = targetPos
+	c.handlePlaylistJumpSlot(slot, curEp)
 }
 
 func isPlaceholderPath(path string) bool {
