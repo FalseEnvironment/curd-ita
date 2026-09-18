@@ -17,6 +17,7 @@ type skipTimesResponse struct {
 // skipResult struct to hold individual skip result data
 type skipResult struct {
 	Interval skipInterval `json:"interval"`
+	SkipType string       `json:"skip_type"`
 }
 
 // skipInterval struct to hold the start and end times for skip intervals
@@ -77,20 +78,18 @@ func ParseAniSkipResponse(responseText string, anime *Anime, timePrecision int) 
 		return fmt.Errorf("no skip times found")
 	}
 
-	// Populate skip times for the anime's episode
-	if len(data.Results) > 0 {
-		op := data.Results[0].Interval
-		anime.Ep.SkipTimes.Op = Skip{
-			Start: int(RoundTime(op.StartTime, timePrecision)),
-			End:   int(RoundTime(op.EndTime, timePrecision)),
+	// Match results by type: AniSkip omits missing types and does not order
+	// them, so an ending-only episode must not be read as an opening.
+	for _, result := range data.Results {
+		skip := Skip{
+			Start: int(RoundTime(result.Interval.StartTime, timePrecision)),
+			End:   int(RoundTime(result.Interval.EndTime, timePrecision)),
 		}
-	}
-
-	if len(data.Results) > 1 {
-		ed := data.Results[len(data.Results)-1].Interval
-		anime.Ep.SkipTimes.Ed = Skip{
-			Start: int(RoundTime(ed.StartTime, timePrecision)),
-			End:   int(RoundTime(ed.EndTime, timePrecision)),
+		switch result.SkipType {
+		case "op":
+			anime.Ep.SkipTimes.Op = skip
+		case "ed":
+			anime.Ep.SkipTimes.Ed = skip
 		}
 	}
 
