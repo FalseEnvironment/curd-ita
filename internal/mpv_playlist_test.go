@@ -478,3 +478,26 @@ func TestNaturalEndSlotIgnoresPicksBeforeTheEnd(t *testing.T) {
 		t.Fatal("the last episode has no next episode to advance to")
 	}
 }
+
+func TestEffectiveRemainingTreatsEndingSkipToFileEndAsFinished(t *testing.T) {
+	c := &MPVPlaylistController{
+		config: &CurdConfig{SkipEd: true},
+		anime:  &Anime{},
+	}
+	c.anime.Ep.Duration = 1420
+	c.anime.Ep.SkipTimes = SkipTimes{Ed: Skip{Start: 1370, End: 1420}}
+
+	// Last sample taken as the ending started; the skip then seeks to the end.
+	if got := c.effectiveRemaining(50); got != 0 {
+		t.Fatalf("effectiveRemaining(50) = %v, want 0", got)
+	}
+	// Mid-episode pick stays a pick.
+	if got := c.effectiveRemaining(600); got != 600 {
+		t.Fatalf("effectiveRemaining(600) = %v, want 600", got)
+	}
+	// Without ending skip the real remaining time is kept.
+	c.config.SkipEd = false
+	if got := c.effectiveRemaining(50); got != 50 {
+		t.Fatalf("effectiveRemaining(50) with SkipEd off = %v, want 50", got)
+	}
+}
