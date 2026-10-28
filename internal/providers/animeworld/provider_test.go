@@ -141,19 +141,30 @@ func TestToSelectionOptionRejectsEntryWithoutWatchPath(t *testing.T) {
 	}
 }
 
-func TestSortByModePrefersRequestedAudioWithoutDropping(t *testing.T) {
+func TestFilterByModeReturnsOnlyMatchingAudio(t *testing.T) {
 	options := []providers.SelectionOption{
 		{Key: "sub", ExtraData: SearchItem{Dub: false}},
 		{Key: "dub", ExtraData: SearchItem{Dub: true}},
 	}
 
-	sorted := sortByMode(options, "dub")
+	// Request dub - should only return dub entry
+	filtered := filterByMode(options, "dub")
 
-	if len(sorted) != 2 {
-		t.Fatalf("expected both entries kept, got %d", len(sorted))
+	if len(filtered) != 1 {
+		t.Fatalf("expected only dub entry, got %d", len(filtered))
 	}
-	if sorted[0].Key != "dub" {
-		t.Errorf("expected dub entry first, got %q", sorted[0].Key)
+	if filtered[0].Key != "dub" {
+		t.Errorf("expected dub entry, got %q", filtered[0].Key)
+	}
+
+	// Request sub - should only return sub entry
+	filtered = filterByMode(options, "sub")
+
+	if len(filtered) != 1 {
+		t.Fatalf("expected only sub entry, got %d", len(filtered))
+	}
+	if filtered[0].Key != "sub" {
+		t.Errorf("expected sub entry, got %q", filtered[0].Key)
 	}
 }
 
@@ -178,6 +189,28 @@ func TestJSONHelpersHandleApiPlaceholders(t *testing.T) {
 	}
 	if !jsonBool(entry, "d") || jsonBool(entry, "e") || !jsonBool(entry, "f") {
 		t.Error("dub flag parsing is wrong for bool/string/number forms")
+	}
+}
+
+func TestParseShowTitleDetectsDubSuffix(t *testing.T) {
+	dub := `<html><body><h1 id="anime-title">Ergo Proxy (ITA)</h1></body></html>`
+	if got := parseShowTitle(dub); got != "Ergo Proxy (ITA)" {
+		t.Fatalf("got %q", got)
+	}
+	if !isDubTitle(parseShowTitle(dub)) {
+		t.Error("dub show title should be detected as dub")
+	}
+
+	sub := `<html><body><h1 id="anime-title">Ergo Proxy</h1></body></html>`
+	if got := parseShowTitle(sub); got != "Ergo Proxy" {
+		t.Fatalf("got %q", got)
+	}
+	if isDubTitle(parseShowTitle(sub)) {
+		t.Error("sub show title must not be detected as dub")
+	}
+
+	if got := parseShowTitle("<html></html>"); got != "" {
+		t.Errorf("missing title should be empty, got %q", got)
 	}
 }
 
@@ -238,6 +271,147 @@ func TestProviderNameAndRegistration(t *testing.T) {
 	}
 	if instance.Name() != "animeworld" {
 		t.Errorf("alias resolved to %q", instance.Name())
+	}
+}
+
+const sampleSearchPage = `
+<html><body>
+<div class="content">
+  <div class="film-list">
+    <div class="item">
+      <div class="inner">
+        <a href="/play/fairies-albums.71rpK" class="poster" data-tip="api/tooltip/82">
+          <img loading="lazy" src="https://img.animeworld.ac/locandine/71rpK.png" alt="Fairies Albums" />
+          <div class="status"><div class="ona">ONA</div><span class="bar"></span></div>
+        </a>
+        <a href="/play/fairies-albums.71rpK" data-jtitle="Bai Yao Pu" class="name">Fairies Albums</a>
+      </div>
+    </div>
+    <div class="item">
+      <div class="inner">
+        <a href="/play/air.XDBaJ" class="poster" data-tip="api/tooltip/2070">
+          <img loading="lazy" src="https://img.animeworld.ac/locandine/22059l.jpg" alt="Air" />
+          <div class="status"><span class="bar"></span></div>
+        </a>
+        <a href="/play/air.XDBaJ" data-jtitle="Air" class="name">Air</a>
+      </div>
+    </div>
+    <div class="item">
+      <div class="inner">
+        <a href="/play/one-piece-ita.XyZ12" class="poster">
+          <img loading="lazy" src="https://img.animeworld.ac/locandine/onepiece.jpg" alt="One Piece (ITA)" />
+        </a>
+        <a href="/play/one-piece-ita.XyZ12" data-jtitle="One Piece" class="name">One Piece (ITA)</a>
+      </div>
+    </div>
+  </div>
+  <div id="sidebar">
+    <a href="/play/top-anime.AAA" data-jtitle="Top Anime" class="name">Top Anime</a>
+  </div>
+</div>
+</body></html>`
+
+func TestParseSearchPageExtractsFullResultList(t *testing.T) {
+	options := parseSearchPage([]byte(sampleSearchPage))
+
+	if len(options) != 3 {
+		t.Fatalf("expected 3 results, got %d: %+v", len(options), options)
+	}
+	if options[0].Key != "fairies-albums.71rpK" {
+		t.Errorf("got first key %q", options[0].Key)
+	}
+	if options[1].Key != "air.XDBaJ" || options[1].Title != "Air" {
+		t.Errorf("missing Air entry: %+v", options[1])
+	}
+	if options[1].Thumbnail != "https://img.animeworld.ac/locandine/22059l.jpg" {
+		t.Errorf("got thumbnail %q", options[1].Thumbnail)
+	}
+	item, ok := options[1].ExtraData.(SearchItem)
+	if !ok || item.JTitle != "Air" {
+		t.Errorf("extra data not parsed: %+v", options[1].ExtraData)
+	}
+	for _, option := range options {
+		if option.Key == "top-anime.AAA" {
+			t.Error("sidebar entries must not be treated as search results")
+		}
+	}
+}
+
+func TestParseSearchPageDetectsItalianDubTitles(t *testing.T) {
+	options := parseSearchPage([]byte(sampleSearchPage))
+
+	item, ok := options[2].ExtraData.(SearchItem)
+	if !ok {
+		t.Fatalf("extra data not parsed: %+v", options[2].ExtraData)
+	}
+	if !item.Dub {
+		t.Error(`"One Piece (ITA)" should be flagged as a dub`)
+	}
+}
+
+func TestParseSearchPageReturnsEmptyWithoutResults(t *testing.T) {
+	page := `<div class="film-list"><br><div class="alert alert-danger">Nessun risultato</div></div>`
+	if options := parseSearchPage([]byte(page)); len(options) != 0 {
+		t.Fatalf("expected no results, got %d", len(options))
+	}
+}
+
+func TestMergeSearchResultsKeepsHtmlOrderAndUsesApiMetadata(t *testing.T) {
+	htmlOptions := []providers.SelectionOption{
+		{Key: "fairies-albums.71rpK", Title: "Fairies Albums", Label: "Fairies Albums"},
+		{Key: "air-gear.RklhB", Title: "Air Gear", Label: "Air Gear"},
+	}
+	apiOptions := []providers.SelectionOption{
+		{Key: "air-gear.RklhB", Title: "Air Gear", Label: "Air Gear (SUB ITA, 2006, 25 ep)", ExtraData: SearchItem{AnilistID: 857}},
+	}
+
+	merged := mergeSearchResults(htmlOptions, apiOptions)
+
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 merged results, got %d", len(merged))
+	}
+	if merged[0].Key != "fairies-albums.71rpK" {
+		t.Errorf("HTML order should be preserved, got %q first", merged[0].Key)
+	}
+	if merged[1].Label != "Air Gear (SUB ITA, 2006, 25 ep)" {
+		t.Errorf("API metadata should win, got %q", merged[1].Label)
+	}
+	item, ok := merged[1].ExtraData.(SearchItem)
+	if !ok || item.AnilistID != 857 {
+		t.Errorf("API extra data should be kept: %+v", merged[1].ExtraData)
+	}
+}
+
+func TestSortByExactTitleMovesExactMatchFirst(t *testing.T) {
+	options := []providers.SelectionOption{
+		{Title: "Fairies Albums"},
+		{Title: "Air Gear"},
+		{Title: "Air"},
+	}
+
+	sorted := sortByExactTitle(options, "Air")
+
+	if sorted[0].Title != "Air" {
+		t.Fatalf("expected exact title first, got %q", sorted[0].Title)
+	}
+	if sorted[1].Title != "Fairies Albums" || sorted[2].Title != "Air Gear" {
+		t.Errorf("relative order of the other entries must be kept: %+v", sorted)
+	}
+}
+
+func TestPlayKeyNormalisesWatchLinks(t *testing.T) {
+	cases := map[string]string{
+		"/play/air.XDBaJ":          "air.XDBaJ",
+		"/play/air.XDBaJ/A7whj":    "air.XDBaJ",
+		"https://x/play/air.XDBaJ": "air.XDBaJ",
+		"/play/air.XDBaJ?x=1":      "air.XDBaJ",
+		"/genre/action":            "",
+		"":                         "",
+	}
+	for href, want := range cases {
+		if got := playKey(href); got != want {
+			t.Errorf("playKey(%q) = %q, want %q", href, got, want)
+		}
 	}
 }
 

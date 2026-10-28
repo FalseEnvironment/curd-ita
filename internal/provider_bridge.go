@@ -144,6 +144,15 @@ func (a *providerAdapter) GetEpisodeURLForModeWithHints(config CurdConfig, id st
 	return links, nil, err
 }
 
+// ProviderIDMatchesMode forwards the optional ModeMatcher capability. Providers
+// that do not implement it are treated as mode-agnostic (always a match).
+func (a *providerAdapter) ProviderIDMatchesMode(id, mode string) (bool, error) {
+	if matcher, ok := a.inner.(providers.ModeMatcher); ok {
+		return matcher.ProviderIDMatchesMode(id, mode)
+	}
+	return true, nil
+}
+
 func resolveProviderID(provider Provider, providerID, query string) (string, error) {
 	inner := unwrapProvider(provider)
 	if inner == nil {

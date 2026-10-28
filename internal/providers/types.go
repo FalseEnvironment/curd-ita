@@ -44,3 +44,11 @@ type HintResolver interface {
 type IDResolver interface {
 	ResolveProviderID(providerID, query string) (string, error)
 }
+
+// ModeMatcher reports whether a stored provider id refers to the requested
+// audio mode. Providers that publish sub and dub as separate catalog entries
+// implement this so a preference change triggers a remap instead of silently
+// playing the mode that was mapped when the anime was added.
+type ModeMatcher interface {
+	ProviderIDMatchesMode(providerID, mode string) (bool, error)
+}

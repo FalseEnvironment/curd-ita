@@ -1,6 +1,10 @@
 package animeworld
 
-import "github.com/wraient/curd/internal/providers"
+import (
+	"strings"
+
+	"github.com/wraient/curd/internal/providers"
+)
 
 // Provider implements animeworld.ac catalog search and stream resolution.
 //
@@ -33,4 +37,26 @@ func (p *Provider) GetEpisodeURLForMode(config providers.PlaybackConfig, id stri
 
 func (p *Provider) GetEpisodeURLForModeWithHints(config providers.PlaybackConfig, id string, epNo int, mode string) ([]string, map[string]providers.StreamPlaybackHint, error) {
 	return getEpisodeStreams(id, epNo)
+}
+
+// ProviderIDMatchesMode reports whether the catalog entry behind id is the
+// requested audio mode. AnimeWorld lists sub and dub as separate entries, so a
+// stored id can silently keep playing the mode chosen when it was mapped.
+func (p *Provider) ProviderIDMatchesMode(id, mode string) (bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, nil
+	}
+	wantDub := providers.NormalizeTranslationType(mode) == "dub"
+
+	html, err := fetchPage(id, false)
+	if err != nil {
+		return false, err
+	}
+	title := parseShowTitle(html)
+	if title == "" {
+		// Unknown title: do not force a remap on incomplete markup.
+		return true, nil
+	}
+	return isDubTitle(title) == wantDub, nil
 }

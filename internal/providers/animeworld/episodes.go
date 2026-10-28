@@ -37,8 +37,9 @@ type cachedPage struct {
 var pageCache sync.Map // showID -> cachedPage
 
 var (
-	divTagRE    = regexp.MustCompile(`(?is)<div[^>]*>`)
-	anchorTagRE = regexp.MustCompile(`(?is)<a[^>]*>`)
+	divTagRE       = regexp.MustCompile(`(?is)<div[^>]*>`)
+	anchorTagRE    = regexp.MustCompile(`(?is)<a[^>]*>`)
+	showTitleTagRE = regexp.MustCompile(`(?is)<h1[^>]*\bid\s*=\s*["']anime-title["'][^>]*>(.*?)</h1>`)
 
 	classAttrRE      = attrPattern("class")
 	dataNameAttrRE   = attrPattern("data-name")
@@ -87,6 +88,16 @@ func fetchPage(showID string, force bool) (string, error) {
 
 	pageCache.Store(showID, cachedPage{html: html, fetchedAt: time.Now()})
 	return html, nil
+}
+
+// parseShowTitle extracts the catalog title from a watch page. Dubbed entries
+// carry an "(ITA)" suffix, which is the site's only per-entry dub marker.
+func parseShowTitle(html string) string {
+	match := showTitleTagRE.FindStringSubmatch(html)
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(htmlTagRE.ReplaceAllString(match[1], ""))
 }
 
 // parseEpisodes walks the watch page and groups every episode anchor by number,

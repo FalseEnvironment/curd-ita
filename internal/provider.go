@@ -21,6 +21,13 @@ type ProviderModeResolver interface {
 	GetEpisodeURLForMode(config CurdConfig, id string, epNo int, mode string) ([]string, error)
 }
 
+// ProviderModeMatcher reports whether a stored provider id refers to the
+// requested audio mode. Used to remap providers that publish sub and dub as
+// separate catalog entries.
+type ProviderModeMatcher interface {
+	ProviderIDMatchesMode(id, mode string) (bool, error)
+}
+
 type ProviderEpisodeResult struct {
 	Links        []string
 	LinkHints    map[string]StreamPlaybackHint
@@ -1037,7 +1044,22 @@ func confidentProviderSearchMatch(options []SelectionOption, anime *Anime, query
 func findProviderIDForAnime(provider Provider, anime *Anime, mode string) (string, error) {
 	currentProviderName, currentProviderID := providerIDForAnime(anime)
 	if currentProviderName == provider.Name() && currentProviderID != "" {
-		return currentProviderID, nil
+		// Some providers publish sub and dub as distinct catalog entries, so a
+		// stored id can pin playback to the mode chosen at mapping time. Verify
+		// it against the requested mode and remap when it no longer matches.
+		if matcher, ok := provider.(ProviderModeMatcher); ok {
+			matches, matchErr := matcher.ProviderIDMatchesMode(currentProviderID, mode)
+			if matchErr != nil {
+				Log(fmt.Sprintf("Could not verify %s/%s mode for %q: %v", provider.Name(), currentProviderID, mode, matchErr))
+				return currentProviderID, nil
+			}
+			if matches {
+				return currentProviderID, nil
+			}
+			Log(fmt.Sprintf("Provider %s id %s does not match requested mode %s; remapping", provider.Name(), currentProviderID, mode))
+		} else {
+			return currentProviderID, nil
+		}
 	}
 
 	query := animeSearchTitle(anime)
