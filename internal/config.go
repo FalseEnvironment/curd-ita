@@ -101,13 +101,6 @@ func defaultStoragePath() string {
 	return filepath.Join(home, ".local", "share", "curd")
 }
 
-func defaultPlayerPath() string {
-	if runtime.GOOS == "windows" {
-		return `C:\Program Files\mpv\mpv.exe`
-	}
-	return "mpv"
-}
-
 func defaultStoragePathValue() string {
 	if runtime.GOOS == "windows" {
 		return `$USERPROFILE\.local\share\curd`
@@ -125,7 +118,7 @@ func GetStoragePath() string {
 // Default configuration values as a map
 func defaultConfigMap() map[string]string {
 	return map[string]string{
-		"Player":                     defaultPlayerPath(),
+		"Player":                     "mpv",
 		"MpvArgs":                    "[]",
 		"MpvPlaybackStartTimeout":    "20",
 		"StoragePath":                defaultStoragePathValue(),
