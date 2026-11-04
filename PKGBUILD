@@ -3,7 +3,7 @@
 # builds from source, because the AnimeWorld provider for Italian audio and
 # subtitles only exists in this fork and not in the upstream release binaries.
 pkgname='curd-ita'
-pkgver=2.0.7
+pkgver=2.0.9.r600.gb94f225
 pkgrel=1
 pkgdesc="Watch anime in CLI with AniList Tracking, Discord RPC, Intro/Outro/Filler/Recap Skipping, and Italian subs and dubs via AnimeWorld"
 arch=('x86_64' 'aarch64')
