@@ -1,10 +1,15 @@
-# local build output
-Build/curd
-
-# makepkg artefacts
-/src/
+curd
+curd-linux-*
+curd-macos-*
+curd-windows-*.exe
+releases/
+Build/mpv/
 /pkg/
+/src/
 /curd-ita/
 *.pkg.tar.zst
 *.pkg.tar.xz
-*.src.tar.gz
+*.pkg.tar
+*.pkg.tar.*
+.wine/
+CLAUDE.md
