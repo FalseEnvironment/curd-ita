@@ -58,7 +58,7 @@ func TestPendingUpdateShouldPromptRespectsSkipAndRemind(t *testing.T) {
 func TestCheckForUpdateInBackgroundWritesPendingState(t *testing.T) {
 	storage := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/Wraient/curd/releases/latest" {
+		if r.URL.Path != "/repos/FalseEnvironment/curd-ita/releases/latest" {
 			http.NotFound(w, r)
 			return
 		}

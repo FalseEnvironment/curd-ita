@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	defaultUpdateRepo          = "Wraient/curd"
+	defaultUpdateRepo          = "FalseEnvironment/curd-ita"
 	updatePendingFileName      = "update_pending.json"
 	backgroundUpdateIdleDelay  = 4 * time.Second
 	defaultRemindLaterDuration = 24 * time.Hour
@@ -282,11 +282,11 @@ func escapePango(s string) string {
 }
 
 var (
-	mdBoldRe  = regexp.MustCompile(`\*\*(.+?)\*\*`)
-	mdCodeRe  = regexp.MustCompile("`([^`]+)`")
-	mdLinkRe  = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
-	mdURLRe   = regexp.MustCompile(`https?://[^\s<>\]]+`)
-	ansiStrip = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	mdBoldRe   = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	mdCodeRe   = regexp.MustCompile("`([^`]+)`")
+	mdLinkRe   = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+	mdURLRe    = regexp.MustCompile(`https?://[^\s<>\]]+`)
+	ansiStrip  = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	pangoStrip = regexp.MustCompile(`<[^>]*>`)
 )
 

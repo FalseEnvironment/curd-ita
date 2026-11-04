@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -593,6 +594,14 @@ func isMPVConnectionGoneError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Locale-independent check: on Windows a closed/missing pipe surfaces as
+	// ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND, which map to os.ErrNotExist
+	// regardless of the OS display language (e.g. Italian
+	// "Impossibile trovare il file specificato."). On Unix a vanished socket
+	// maps to syscall.ENOENT, which also satisfies os.ErrNotExist.
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
 	errMsg := strings.ToLower(err.Error())
 	goneErrors := []string{
 		"connect: connection refused",
@@ -785,7 +794,6 @@ func asInt64(v interface{}) (int64, bool) {
 		return 0, false
 	}
 }
-
 
 func mpvResponseData(response map[string]interface{}) (interface{}, error) {
 	if errorValue, exists := response["error"]; exists {

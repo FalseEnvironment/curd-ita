@@ -2,6 +2,8 @@ package internal
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 )
@@ -41,5 +43,19 @@ func TestIsMPVConnectionGoneError(t *testing.T) {
 
 	if isMPVConnectionGoneError(errors.New("i/o timeout")) {
 		t.Fatal("did not expect timeout to be treated as closed connection")
+	}
+}
+
+func TestIsMPVConnectionGoneErrorWrappedErrNotExist(t *testing.T) {
+	// On Windows a closed/lost named pipe surfaces as ERROR_FILE_NOT_FOUND,
+	// which errors.Is maps to os.ErrNotExist regardless of the OS display
+	// language (e.g. Italian "Impossibile trovare il file specificato.").
+	// MPVSendCommand wraps the dial error twice, so make sure the typed
+	// check survives the wrapping.
+	err := fmt.Errorf("command failed after 3 attempts: %w",
+		fmt.Errorf("connect: %w",
+			&os.PathError{Op: "open", Path: `\\.\pipe\curd_mpvsocket_8798b6ec`, Err: os.ErrNotExist}))
+	if !isMPVConnectionGoneError(err) {
+		t.Fatalf("expected wrapped os.ErrNotExist to be treated as connection gone: %v", err)
 	}
 }

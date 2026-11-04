@@ -140,18 +140,17 @@ func ExitCurd(err error) {
 	RestoreScreen()
 
 	anime := GetGlobalAnime()
-	socketPath := ""
 	if (anime != nil) && (anime.Ep.Player.SocketPath != "") {
-		socketPath = anime.Ep.Player.SocketPath
-		_, err = MPVSendCommand(anime.Ep.Player.SocketPath, []interface{}{"quit"})
-		if err != nil {
-			Log("Error closing MPV: " + err.Error())
+		// Best-effort: ask MPV to quit. Never let a failed quit (e.g. MPV
+		// already closed by the user) override the original error.
+		if _, quitErr := MPVSendCommand(anime.Ep.Player.SocketPath, []interface{}{"quit"}); quitErr != nil {
+			Log("Error closing MPV: " + quitErr.Error())
 		}
 	}
 
 	CurdOut("Have a great day!")
-	// If the error is not about the connection refused, print the error
-	if err != nil && (socketPath == "" || !strings.Contains(err.Error(), "dial unix "+socketPath+": connect: connection refused")) {
+	// If the error is not just the MPV connection being gone, print it.
+	if err != nil && !isMPVConnectionGoneError(err) {
 		CurdOut(fmt.Sprintf("Error: %v", err))
 		if runtime.GOOS == "windows" {
 			fmt.Println("Press Enter to exit")
