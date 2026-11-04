@@ -1,5 +1,5 @@
 //go:build !(windows && arm64)
-// +build !windows_arm64
+// +build !windows !arm64
 
 package internal
 

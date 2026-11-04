@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -92,20 +93,42 @@ func MpvPlaybackStartTimeoutDuration(config *CurdConfig) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+func defaultStoragePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = os.ExpandEnv("$HOME")
+	}
+	return filepath.Join(home, ".local", "share", "curd")
+}
+
+func defaultPlayerPath() string {
+	if runtime.GOOS == "windows" {
+		return `C:\Program Files\mpv\mpv.exe`
+	}
+	return "mpv"
+}
+
+func defaultStoragePathValue() string {
+	if runtime.GOOS == "windows" {
+		return `$USERPROFILE\.local\share\curd`
+	}
+	return "$HOME/.local/share/curd"
+}
+
 func GetStoragePath() string {
 	if globalConfig != nil && globalConfig.StoragePath != "" {
 		return os.ExpandEnv(globalConfig.StoragePath)
 	}
-	return filepath.Join(os.ExpandEnv("$HOME"), ".local", "share", "curd")
+	return defaultStoragePath()
 }
 
 // Default configuration values as a map
 func defaultConfigMap() map[string]string {
 	return map[string]string{
-		"Player":                     "mpv",
+		"Player":                     defaultPlayerPath(),
 		"MpvArgs":                    "[]",
 		"MpvPlaybackStartTimeout":    "20",
-		"StoragePath":                "$HOME/.local/share/curd",
+		"StoragePath":                defaultStoragePathValue(),
 		"AnimeNameLanguage":          "english",
 		"SubsLanguage":               "english",
 		"MenuOrder":                  "CURRENT,ALL,UNTRACKED,UPDATE,REMAP_PROVIDER,CONTINUE_LAST,TRACKER,PROVIDER",
@@ -333,6 +356,18 @@ func createDefaultConfig(path string) error {
 		line := fmt.Sprintf("%s=%s\n", key, value)
 		if _, err := writer.WriteString(line); err != nil {
 			return fmt.Errorf("error writing to file: %v", err)
+		}
+		switch key {
+		case "Player":
+			if runtime.GOOS == "windows" {
+				if _, err := writer.WriteString("# Modify This\n"); err != nil {
+					return fmt.Errorf("error writing to file: %v", err)
+				}
+			}
+		case "SubOrDub":
+			if _, err := writer.WriteString("# Modify this with Sub or Dub\n"); err != nil {
+				return fmt.Errorf("error writing to file: %v", err)
+			}
 		}
 	}
 	if err := writer.Flush(); err != nil {
