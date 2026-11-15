@@ -1,6 +1,10 @@
 package internal
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/wraient/curd/internal/providers/animeworld"
+)
 
 // modeAwareStub implements Provider plus ProviderModeMatcher so tests can force
 // a stored-id/mode mismatch without touching the network.
@@ -65,10 +69,15 @@ func TestFindProviderIDForAnimeRemapsOnModeMismatch(t *testing.T) {
 		name:        "animeworld",
 		matchResult: false,
 		searchFor: map[string][]SelectionOption{
-			"dub": {{Key: "ergo-proxy.bS-7W", Title: "Ergo Proxy (ITA)"}},
+			"dub": {{
+				Key:       "ergo-proxy.bS-7W",
+				Title:     "Ergo Proxy (ITA)",
+				ExtraData: animeworld.SearchItem{AnilistID: 4242},
+			}},
 		},
 	}
 	anime := &Anime{
+		AnilistId:    4242,
 		Title:        AnimeTitle{English: "Ergo Proxy"},
 		ProviderName: "animeworld",
 		ProviderId:   "ergo-proxy-t.irMK5",

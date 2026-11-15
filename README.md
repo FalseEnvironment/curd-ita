@@ -19,8 +19,8 @@ you left off — plus:
 
 - Italian audio and subtitles through AnimeWorld, matched to AniList by the
   provider's own IDs instead of by title
-- Multiple providers with ordered fallback (AnimeWorld, Senshi, AniPub, AniNeko,
-  AllAnime, Animepahe) at up to 1080p
+- Multiple providers with ordered fallback (AnimeWorld, AniPM, Anikoto, AniPub,
+  Senshi, AniNeko, AllAnime, Animepahe) at up to 1080p
 
 Upstream's [README](https://github.com/Wraient/curd#readme) covers the shared
 features, demo videos and the community links in more detail.
@@ -82,7 +82,7 @@ options that differ in this fork:
 
 | Option     | Valid values                                                      | Description                                                                                                                                             |
 | ---------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Provider` | `["animeworld"]` (default), `stacked`, or any single-provider list | `["animeworld"]` plays Italian only, with no fallback. `stacked` uses the upstream chain: animeworld → senshi → anipub → anineko → allanime → animepahe. |
+| `Provider` | `["animeworld"]` (default), `stacked`, or any single-provider list | `["animeworld"]` plays Italian only, with no fallback. `stacked` uses the upstream chain: animeworld → anipm → anikoto → anipub → senshi → anineko → allanime → animepahe. |
 | `SubOrDub` | `sub` (default), `dub`                                            | On AnimeWorld, `sub` means Italian subtitles and `dub` means Italian audio.                                                                              |
 
 You can quit at any time and the resume position is saved in the history file. More
@@ -130,6 +130,7 @@ keeps the pending MyAnimeList PKCE state so the login can be completed manually.
 | `RofiSelection`           | Boolean    | `true`, `false`                                        | Enables or disables anime selection via Rofi.                                                     |
 | `PercentageToMarkComplete`| Integer    | `0` to `100`                                           | Sets the percentage of an episode watched to consider it as completed.                            |
 | `StoragePath`             | String     | Any valid path (environment variables accepted)        | Specifies the directory where Curd stores its data.                                               |
+| `SubOrDub`                | Enum       | `sub`, `dub`                                           | Sets the preferred format for anime audio. On AnimeWorld, `sub` means Italian subtitles and `dub` means Italian audio. Default: `sub` |
 | `SubStyle`                | Enum       | `ask`, `soft`, `hard`                                  | For AniNeko sub streams: `ask` prompts once when both soft-sub and hard-sub servers exist, then saves your choice here; `soft` uses external `.vtt` subtitles via mpv; `hard` uses burned-in subs. Default: `ask` |
 | `NextEpisodePrompt`       | Boolean    | `true`, `false`                                        | Prompts the user before automatically playing the next episode.                                   |
 | `SubsLanguage`            | String     | `english` (redundant rn)                               | Sets the preferred subtitle language.                                                             |
@@ -142,6 +143,7 @@ keeps the pending MyAnimeList PKCE state so the login can be completed manually.
 | `SaveMpvSpeed`            | Boolean    | `true`, `false`                                        | Retains the playback speed set in MPV for next episode.                                           |
 | `SkipFiller`              | Boolean    | `true`, `false`                                        | Skips filler episodes when supported.                                                             |
 | `MenuOrder`               | String     | Comma-separated list                                   | Controls which menu items appear and their order. Available options: `CURRENT`, `ALL`, `UNTRACKED`, `UPDATE`, `REMAP_PROVIDER`, `CONTINUE_LAST`, `PLANNING`, `COMPLETED`, `PAUSED`, `DROPPED`, `REWATCHING`, `TRACKER`, `PROVIDER`. Only listed items will be shown. Default: `CURRENT,ALL,UNTRACKED,UPDATE,REMAP_PROVIDER,CONTINUE_LAST,TRACKER,PROVIDER` |
+| `Provider`                | List       | `["animeworld"]`, `stacked`, or any provider list      | Sets the content-provider fallback list. `["animeworld"]` (fork default) plays Italian only, with no fallback. `stacked` uses the full chain: animeworld → anipm → anikoto → anipub → senshi → anineko → allanime → animepahe. anineko, allanime and animepahe are disabled by default (site down / anti-bot / Cloudflare) unless included in `Provider`. |
 | `ManualProviderSearch`    | Boolean    | `true`, `false`                                        | Skip automatic provider matching and always show provider search results for manual selection. Displays a hint with the tracker title, format (TV/Movie/etc.), episode count, and sub/dub mode. Default: `false` |
 | `TrackingLocal`           | Boolean    | `true`                                                 | Legacy compatibility flag. Local playback history is always enabled.                              |
 | `TrackingRemote`          | Enum       | `none`, `anilist`, `myanimelist`, `anilist+myanimelist`| Selects which remote tracker curd syncs with.                                                     |
@@ -185,10 +187,12 @@ match, set `Provider=stacked` in the config.
 - [MyAnimeList API](https://myanimelist.net/apiconfig/references/api/v2) - MyAnimeList OAuth and tracking sync
 - [AniSkip API](https://api.aniskip.com/api-docs) - Get anime intro and outro timings
 - [AnimeWorld](https://www.animeworld.ac/) - Default provider for Italian subs and dubs, serving direct MP4 streams
-- [Senshi Project](https://senshi.live/) - Provider with direct HLS streams and MAL-based catalog matching
-- [AniPub](https://anipub.xyz/) - Fast JSON catalog APIs with MegaPlay HLS streams
+- [Senshi Project](https://senshi.to/) - Provider with direct HLS streams and MAL-based catalog matching
+- [AniPub](https://anipub.org/) - Fast JSON catalog APIs with MegaPlay HLS streams
 - [AniNeko Content](https://anineko.to/) - Alternative provider with soft/hard sub stream selection
 - [Animepahe Content](https://animepahe.pw/) - Alternative provider for 1080p streams
+- [Anikoto](https://anikototv.to/) - VRF-protected catalog with native MegaPlay stream resolution
+- [AniPM](https://ani.pm/) - Default provider with fast JSON APIs and Settlar HLS streams (soft/hard sub + dub)
 - [Jikan](https://jikan.moe/) - Get filler episode number
 
 ## Credits

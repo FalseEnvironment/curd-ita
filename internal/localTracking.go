@@ -429,6 +429,10 @@ func WatchUntracked(userCurdConfig *CurdConfig) {
 		// Get anime name from user
 		query, err = promptText(userCurdConfig, "Enter the anime name", false)
 		if err != nil {
+			if strings.Contains(err.Error(), "input cannot be empty") {
+				CurdOut("Please enter the anime name.")
+				continue
+			}
 			Log("Error getting user input: " + err.Error())
 			ExitCurd(fmt.Errorf("Error getting user input: " + err.Error()))
 		}
@@ -452,14 +456,23 @@ func WatchUntracked(userCurdConfig *CurdConfig) {
 		break
 	}
 
-	// Get episode number
-	episodeNumber, err := promptPositiveEpisodeNumber(userCurdConfig, "Enter the episode number")
-	if err != nil {
-		Log(fmt.Sprintf("Invalid episode number: %v", err))
-		ExitCurd(fmt.Errorf("Invalid episode number"))
-	}
+	// Get episode number, clamped against the picked provider's listing so a
+	// typo doesn't lead to a doomed playback attempt.
+	for {
+		episodeNumber, err := promptPositiveEpisodeNumber(userCurdConfig, "Enter the episode number")
+		if err != nil {
+			Log(fmt.Sprintf("Invalid episode number: %v", err))
+			ExitCurd(fmt.Errorf("Invalid episode number"))
+		}
 
-	anime.Ep.Number = episodeNumber
+		if episodes, listErr := EpisodesList(QualifyProviderID(anime.ProviderName, anime.ProviderId), userCurdConfig.SubOrDub); listErr == nil && len(episodes) > 0 && !episodeNumberInList(episodes, episodeNumber) {
+			CurdOut(fmt.Sprintf("Provider lists up to %s; episode %d is not available.", episodes[len(episodes)-1], episodeNumber))
+			continue
+		}
+
+		anime.Ep.Number = episodeNumber
+		break
+	}
 
 	for {
 		// Prefer prefetched next-episode links when available (same as tracked path).
@@ -474,7 +487,7 @@ func WatchUntracked(userCurdConfig *CurdConfig) {
 			anime.Ep.NextEpisode = NextEpisode{}
 		} else {
 			// Preferred-first resolve; diagnosed recovery only after that fails.
-			resolvedLink, ok := resolveEpisodeLinksWithRecovery(userCurdConfig, &anime, nil, true)
+			resolvedLink, ok := resolveEpisodeLinksWithRecovery(userCurdConfig, &anime, nil)
 			if !ok {
 				ExitCurd(nil)
 			}
@@ -637,9 +650,17 @@ func prefetchNextUntrackedEpisode(userCurdConfig *CurdConfig, anime *Anime) {
 	nextEpisode := *anime
 	nextEpisode.ProviderId = anime.ProviderId
 	nextEpisode.ProviderName = anime.ProviderName
+	if providerNoPrefetch(CurrentAnimeProviderName(&nextEpisode)) {
+		anime.Ep.NextEpisode = NextEpisode{}
+		return
+	}
 	nextResult, err := ResolveEpisodeURL(*userCurdConfig, &nextEpisode, nextEpNum)
 	if err != nil {
 		Log(fmt.Sprintf("Error getting next untracked episode link for ep %d: %v", nextEpNum, err))
+		return
+	}
+	if providerNoPrefetch(nextResult.ProviderName) {
+		anime.Ep.NextEpisode = NextEpisode{}
 		return
 	}
 	anime.Ep.NextEpisode = NextEpisode{
